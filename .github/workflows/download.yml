@@ -1,21 +1,29 @@
-name: 下载JM本子
+name: 下载JM本子 (commit)
 
 on:
   workflow_dispatch:
   push:
-    branches-ignore:
-      - 'master' # master专门用于发布pip和repo介绍
     paths:
       - '.github/workflows/download.yml' # 工作流定义
       - 'usage/workflow_download.py' # 下载脚本
-      - 'assets/config/option_workflow_download.yml' # 配置文件
+      - 'assets/option/option_workflow_download.yml' # 配置文件
 
 jobs:
   crawler:
     runs-on: ubuntu-latest
     env:
+      # 登录相关secrets
       JM_USERNAME: ${{ secrets.JM_USERNAME }}
       JM_PASSWORD: ${{ secrets.JM_PASSWORD }}
+
+      # 邮件相关secrets
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      EMAIL_TITLE: ${{ secrets.EMAIL_TITLE }}
+      EMAIL_CONTENT: ${{ secrets.EMAIL_CONTENT }}
+      
+      # 固定值
       JM_DOWNLOAD_DIR: /home/runner/work/jmcomic/download/
       ZIP_NAME: '本子.tar.gz'
       UPLOAD_NAME: '下载完成的本子'
@@ -43,7 +51,6 @@ jobs:
           pip install -e ./
 
       - name: 运行下载脚本
-        continue-on-error: true
         run: |
           cd ./usage/
           python workflow_download.py

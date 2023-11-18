@@ -42,14 +42,16 @@ class JmcomicUI:
         parser.add_argument(
             '--option',
             help='path to the option file, you can also specify it by env `JM_OPTION_PATH`',
+            type=str,
             default=get_env('JM_OPTION_PATH', ''),
         )
 
         args = parser.parse_args()
-        if len(args.option) != 0:
-            self.option_path = os.path.abspath(args.option)
-        else:
+        option = args.option
+        if len(option) == 0 or option == "''":
             self.option_path = None
+        else:
+            self.option_path = os.path.abspath(option)
 
         self.raw_id_list = args.id_list
         self.parse_raw_id()
@@ -60,7 +62,7 @@ class JmcomicUI:
             from .jm_toolkit import JmcomicText
 
             try:
-                return JmcomicText.parse_to_album_id(text)
+                return JmcomicText.parse_to_jm_id(text)
             except Exception as e:
                 print(e.args[0])
                 exit(1)
@@ -75,13 +77,13 @@ class JmcomicUI:
 
     def main(self):
         self.parse_arg()
-        from .api import jm_debug
-        jm_debug('command_line',
-                 f'start downloading...\n'
-                 f'- using option: [{self.option_path or "default"}]\n'
-                 f'to be downloaded: \n'
-                 f'- album: {self.album_id_list}\n'
-                 f'- photo: {self.photo_id_list}')
+        from .api import jm_log
+        jm_log('command_line',
+               f'start downloading...\n'
+               f'- using option: [{self.option_path or "default"}]\n'
+               f'to be downloaded: \n'
+               f'- album: {self.album_id_list}\n'
+               f'- photo: {self.photo_id_list}')
 
         from .api import create_option, JmOption
         if self.option_path is not None:

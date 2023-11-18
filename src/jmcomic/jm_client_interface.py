@@ -8,6 +8,7 @@ Response Entity
 
 DictModel = AdvancedEasyAccessDict
 
+
 class JmResp(CommonResp):
 
     @property
@@ -22,7 +23,8 @@ class JmResp(CommonResp):
 
     def require_success(self):
         if self.is_not_success:
-            raise JmModuleConfig.exception(self.resp.text)
+            ExceptionTool.raises_resp(self.text, self.resp)
+
 
 class JmImageResp(JmResp):
 
@@ -30,10 +32,7 @@ class JmImageResp(JmResp):
         raise NotImplementedError
 
     def require_success(self):
-        if self.is_success:
-            return
-
-        raise JmModuleConfig.exception(self.get_error_msg())
+        ExceptionTool.require_true(self.is_success, self.get_error_msg())
 
     def get_error_msg(self):
         msg = f'禁漫图片获取失败: [{self.url}]'
@@ -53,16 +52,16 @@ class JmImageResp(JmResp):
 
         if decode_image is False:
             # 不解密图片，直接保存文件
-            JmImageSupport.save_resp_img(
+            JmImageTool.save_resp_img(
                 self,
                 path,
                 need_convert=suffix_not_equal(img_url, path),
             )
         else:
             # 解密图片并保存文件
-            JmImageSupport.decode_and_save(
-                JmImageSupport.get_num_by_url(scramble_id, img_url),
-                JmImageSupport.open_Image(self.content),
+            JmImageTool.decode_and_save(
+                JmImageTool.get_num_by_url(scramble_id, img_url),
+                JmImageTool.open_Image(self.content),
                 path,
             )
 
@@ -71,8 +70,7 @@ class JmApiResp(JmResp):
 
     @classmethod
     def wrap(cls, resp, key_ts):
-        if isinstance(resp, JmApiResp):
-            raise JmModuleConfig.exception('重复包装')
+        ExceptionTool.require_true(not isinstance(resp, JmApiResp), f'重复包装: {resp}')
 
         return cls(resp, key_ts)
 
@@ -152,16 +150,20 @@ class JmDetailClient:
     def get_album_detail(self, album_id) -> JmAlbumDetail:
         raise NotImplementedError
 
-    def get_photo_detail(self, photo_id, fetch_album=True) -> JmPhotoDetail:
+    def get_photo_detail(self,
+                         photo_id,
+                         fetch_album=True,
+                         fetch_scramble_id=True,
+                         ) -> JmPhotoDetail:
         raise NotImplementedError
 
     def of_api_url(self, api_path, domain):
         raise NotImplementedError
 
-    def enable_cache(self, debug=False):
+    def set_cache_dict(self, cache_dict: Optional[Dict]):
         raise NotImplementedError
 
-    def is_cache_enabled(self) -> bool:
+    def get_cache_dict(self) -> Optional[Dict]:
         raise NotImplementedError
 
     def check_photo(self, photo: JmPhotoDetail):
@@ -174,7 +176,7 @@ class JmDetailClient:
         本方法会检查photo是不是[1]，
         如果是[1]，通过请求获取[2]，然后把2中的一些重要字段更新到1中
 
-        @param photo: 被检查的JmPhotoDetail对象
+        :param photo: 被检查的JmPhotoDetail对象
         """
         # 检查 from_album
         if photo.from_album is None:
@@ -192,9 +194,6 @@ class JmUserClient:
     def login(self,
               username,
               password,
-              refresh_client_cookies=True,
-              id_remember='on',
-              login_remember='on',
               ):
         raise NotImplementedError
 
@@ -208,12 +207,27 @@ class JmUserClient:
                       ) -> JmAcResp:
         """
         评论漫画/评论回复
-        @param video_id: album_id/photo_id
-        @param comment: 评论内容
-        @param status: 是否 "有劇透"
-        @param comment_id: 被回复评论的id
-        @param originator:
-        @return: JmAcResp 对象
+        :param video_id: album_id/photo_id
+        :param comment: 评论内容
+        :param status: 是否 "有劇透"
+        :param comment_id: 被回复评论的id
+        :param originator:
+        :returns: JmAcResp 对象
+        """
+        raise NotImplementedError
+
+    def favorite_folder(self,
+                        page=1,
+                        order_by=JmMagicConstants.ORDER_BY_LATEST,
+                        folder_id='0',
+                        username='',
+                        ) -> JmFavoritePage:
+        """
+        获取收藏了的漫画，文件夹默认是全部
+        :param folder_id: 文件夹id
+        :param page: 分页
+        :param order_by: 排序
+        :param username: 用户名
         """
         raise NotImplementedError
 
@@ -230,13 +244,13 @@ class JmImageClient:
                        ):
         """
         下载JM的图片
-        @param img_url: 图片url
-        @param img_save_path: 图片保存位置
-        @param scramble_id: 图片所在photo的scramble_id
-        @param decode_image: 要保存的是解密后的图还是原图
+        :param img_url: 图片url
+        :param img_save_path: 图片保存位置
+        :param scramble_id: 图片所在photo的scramble_id
+        :param decode_image: 要保存的是解密后的图还是原图
         """
         if scramble_id is None:
-            scramble_id = JmModuleConfig.SCRAMBLE_0
+            scramble_id = JmMagicConstants.SCRAMBLE_220980
 
         # 请求图片
         resp = self.get_jm_image(img_url)
@@ -245,13 +259,9 @@ class JmImageClient:
 
         return self.save_image_resp(decode_image, img_save_path, img_url, resp, scramble_id)
 
+    # noinspection PyMethodMayBeStatic
     def save_image_resp(self, decode_image, img_save_path, img_url, resp, scramble_id):
-        # gif图无需加解密，需要最先判断
-        if self.img_is_not_need_to_decode(img_url, resp):
-            # 相当于调用save_directly，但使用save_resp_img可以统一调用入口
-            JmImageSupport.save_resp_img(resp, img_save_path, False)
-        else:
-            resp.transfer_to(img_save_path, scramble_id, decode_image, img_url)
+        resp.transfer_to(img_save_path, scramble_id, decode_image, img_url)
 
     def download_by_image_detail(self,
                                  image: JmImageDetail,
@@ -269,7 +279,14 @@ class JmImageClient:
         raise NotImplementedError
 
     @classmethod
-    def img_is_not_need_to_decode(cls, data_original: str, _resp):
+    def img_is_not_need_to_decode(cls, data_original: str, _resp) -> bool:
+        # https://cdn-msp2.18comic.vip/media/photos/498976/00027.gif?v=1697541064
+        query_params_index = data_original.find('?')
+
+        if query_params_index != -1:
+            data_original = data_original[:query_params_index]
+
+        # https://cdn-msp2.18comic.vip/media/photos/498976/00027.gif
         return data_original.endswith('.gif')
 
 
@@ -289,16 +306,6 @@ class JmSearchAlbumClient:
     範例:全彩 人妻
     """
 
-    ORDER_BY_LATEST = 'mr'
-    ORDER_BY_VIEW = 'mv'
-    ORDER_BY_PICTURE = 'mp'
-    ORDER_BY_LIKE = 'tf'
-
-    TIME_TODAY = 't'
-    TIME_WEEK = 'w'
-    TIME_MONTH = 'm'
-    TIME_ALL = 'a'
-
     def search(self,
                search_query: str,
                page: int,
@@ -314,8 +321,8 @@ class JmSearchAlbumClient:
     def search_site(self,
                     search_query: str,
                     page: int = 1,
-                    order_by: str = ORDER_BY_LATEST,
-                    time: str = TIME_ALL,
+                    order_by: str = JmMagicConstants.ORDER_BY_LATEST,
+                    time: str = JmMagicConstants.TIME_ALL,
                     ):
         """
         对应禁漫的站内搜索
@@ -325,8 +332,8 @@ class JmSearchAlbumClient:
     def search_work(self,
                     search_query: str,
                     page: int = 1,
-                    order_by: str = ORDER_BY_LATEST,
-                    time: str = TIME_ALL,
+                    order_by: str = JmMagicConstants.ORDER_BY_LATEST,
+                    time: str = JmMagicConstants.TIME_ALL,
                     ):
         """
         搜索album的作品 work
@@ -336,8 +343,8 @@ class JmSearchAlbumClient:
     def search_author(self,
                       search_query: str,
                       page: int = 1,
-                      order_by: str = ORDER_BY_LATEST,
-                      time: str = TIME_ALL,
+                      order_by: str = JmMagicConstants.ORDER_BY_LATEST,
+                      time: str = JmMagicConstants.TIME_ALL,
                       ):
         """
         搜索album的作者 author
@@ -347,8 +354,8 @@ class JmSearchAlbumClient:
     def search_tag(self,
                    search_query: str,
                    page: int = 1,
-                   order_by: str = ORDER_BY_LATEST,
-                   time: str = TIME_ALL,
+                   order_by: str = JmMagicConstants.ORDER_BY_LATEST,
+                   time: str = JmMagicConstants.TIME_ALL,
                    ):
         """
         搜索album的标签 tag
@@ -358,8 +365,8 @@ class JmSearchAlbumClient:
     def search_actor(self,
                      search_query: str,
                      page: int = 1,
-                     order_by: str = ORDER_BY_LATEST,
-                     time: str = TIME_ALL,
+                     order_by: str = JmMagicConstants.ORDER_BY_LATEST,
+                     time: str = JmMagicConstants.TIME_ALL,
                      ):
         """
         搜索album的登场角色 actor
@@ -375,14 +382,101 @@ class JmcomicClient(
     JmSearchAlbumClient,
     Postman,
 ):
-    def get_jmcomic_url(self):
-        return JmModuleConfig.get_jmcomic_url()
-
-    def get_jmcomic_domain_all(self):
-        return JmModuleConfig.get_jmcomic_domain_all()
+    client_key: None
 
     def get_domain_list(self) -> List[str]:
+        """
+        获取当前client的域名配置
+        """
         raise NotImplementedError
 
     def set_domain_list(self, domain_list: List[str]):
+        """
+        设置当前client的域名配置
+        """
         raise NotImplementedError
+
+    def get_html_domain(self, postman=None):
+        return JmModuleConfig.get_html_domain(postman or self.get_root_postman())
+
+    def get_html_domain_all(self, postman=None):
+        return JmModuleConfig.get_html_domain_all(postman or self.get_root_postman())
+
+    # noinspection PyMethodMayBeStatic
+    def do_page_iter(self, params: dict, page: int, get_page_method):
+        from math import inf
+        def update(value: Union[Dict], page: int, page_content: JmPageContent):
+            if value is None:
+                return page + 1, page_content.page_count
+
+            ExceptionTool.require_true(isinstance(value, dict), 'require dict params')
+
+            # 根据外界传递的参数，更新params和page
+            page = value.get('page', page)
+            params.update(value)
+
+            return page, inf
+
+        total = inf
+        while page <= total:
+            params['page'] = page
+            page_content = get_page_method(**params)
+            value = yield page_content
+            page, total = update(value, page, page_content)
+
+    def favorite_folder_gen(self,
+                            page=1,
+                            order_by=JmMagicConstants.ORDER_BY_LATEST,
+                            folder_id='0',
+                            username='',
+                            ) -> Generator[JmFavoritePage, Dict, None]:
+        """
+        见 search_gen
+        """
+        params = {
+            'order_by': order_by,
+            'folder_id': folder_id,
+            'username': username,
+        }
+
+        yield from self.do_page_iter(params, page, self.favorite_folder)
+
+    def search_gen(self,
+                   search_query: str,
+                   main_tag=0,
+                   page: int = 1,
+                   order_by: str = JmMagicConstants.ORDER_BY_LATEST,
+                   time: str = JmMagicConstants.TIME_ALL,
+                   ) -> Generator[JmSearchPage, Dict, None]:
+        """
+        搜索结果的生成器，支持下面这种调用方式：
+
+        ```
+        for page in self.search_gen('无修正'):
+            # 每次循环，page为新页的结果
+            pass
+        ```
+
+        同时支持外界send参数，可以改变搜索的设定，例如：
+
+        ```
+        gen = client.search_gen('MANA')
+        for i, page in enumerate(gen):
+            print(page.page_count)
+            page = gen.send({
+                'search_query': '+MANA +无修正',
+                'page': 1
+            })
+            print(page.page_count)
+            break
+        ```
+
+        """
+        params = {
+            'search_query': search_query,
+            'main_tag': main_tag,
+            'order_by': order_by,
+            'time': time,
+        }
+
+        yield from self.do_page_iter(params, page, self.search)

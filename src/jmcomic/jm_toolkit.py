@@ -4,79 +4,77 @@ from .jm_entity import *
 
 
 class JmcomicText:
-    pattern_jm_domain = compile('https://([\w.-]+)')
-    pattern_jm_pa_id = compile('(photos?|album)/(\d+)')
-    pattern_html_jm_pub_domain = compile('[\w-]+\.\w+/?\w+')
+    pattern_jm_domain = compile(r'https://([\w.-]+)')
+    pattern_jm_pa_id = compile(r'(photos?|album)/(\d+)')
+    pattern_html_jm_pub_domain = compile(r'[\w-]+\.\w+/?\w+')
 
-    pattern_html_photo_photo_id = compile('<meta property="og:url" content=".*?/photo/(\d+)/?.*?">')
-    pattern_html_photo_scramble_id = compile('var scramble_id = (\d+);')
-    pattern_html_photo_name = compile('<title>([\s\S]*?)\|.*</title>')
-    # pattern_html_photo_data_original_list = compile('data-original="(.*?)" id="album_photo_.+?"')
-    pattern_html_photo_data_original_domain = compile('src="https://(.*?)/media/albums/blank')
-    pattern_html_photo_data_original_0 = compile('data-original="(.*?)"[ \n]*?id="album_photo')
-    pattern_html_photo_keywords = compile('<meta name="keywords"[\s\S]*?content="(.*?)"')
-    pattern_html_photo_series_id = compile('var series_id = (\d+);')
-    pattern_html_photo_sort = compile('var sort = (\d+);')
-    pattern_html_photo_page_arr = compile('var page_arr = (.*?);')
+    pattern_html_photo_photo_id = compile(r'<meta property="og:url" content=".*?/photo/(\d+)/?.*?">')
+    pattern_html_photo_scramble_id = compile(r'var scramble_id = (\d+);')
+    pattern_html_photo_name = compile(r'<title>([\s\S]*?)\|.*</title>')
+    # pattern_html_photo_data_original_list = compile(r'data-original="(.*?)" id="album_photo_.+?"')
+    pattern_html_photo_data_original_domain = compile(r'src="https://(.*?)/media/albums/blank')
+    pattern_html_photo_data_original_0 = compile(r'data-original="(.*?)"[^>]*?id="album_photo[^>]*?data-page="0"')
+    pattern_html_photo_tags = compile(r'<meta name="keywords"[\s\S]*?content="(.*?)"')
+    pattern_html_photo_series_id = compile(r'var series_id = (\d+);')
+    pattern_html_photo_sort = compile(r'var sort = (\d+);')
+    pattern_html_photo_page_arr = compile(r'var page_arr = (.*?);')
 
-    pattern_html_album_album_id = compile('<span class="number">.*?：JM(\d+)</span>')
-    pattern_html_album_scramble_id = compile('var scramble_id = (\d+);')
-    pattern_html_album_name = compile('<h1 class="book-name" id="book-name">([\s\S]*?)</h1>')
-    pattern_html_album_episode_list = compile('data-album="(\d+)">\n *?<li.*?>\n *'
-                                              '第(\d+)話\n([\s\S]*?)\n *'
-                                              '<[\s\S]*?>(\d+-\d+-\d+).*?')
-    pattern_html_album_page_count = compile('<span class="pagecount">.*?:(\d+)</span>')
-    pattern_html_album_pub_date = compile('>上架日期 : (.*?)</span>')
-    pattern_html_album_update_date = compile('>更新日期 : (.*?)</span>')
+    pattern_html_album_album_id = compile(r'<span class="number">.*?：JM(\d+)</span>')
+    pattern_html_album_scramble_id = compile(r'var scramble_id = (\d+);')
+    pattern_html_album_name = compile(r'<h1 class="book-name" id="book-name">([\s\S]*?)</h1>')
+    pattern_html_album_episode_list = compile(r'data-album="(\d+)">\n *?<li.*?>\n *'
+                                              r'第(\d+)話\n([\s\S]*?)\n *'
+                                              r'<[\s\S]*?>(\d+-\d+-\d+).*?')
+    pattern_html_album_page_count = compile(r'<span class="pagecount">.*?:(\d+)</span>')
+    pattern_html_album_pub_date = compile(r'>上架日期 : (.*?)</span>')
+    pattern_html_album_update_date = compile(r'>更新日期 : (.*?)</span>')
     # 作品
     pattern_html_album_works = [
-        compile('<span itemprop="author" data-type="works">([\s\S]*?)</span>'),
-        compile('<a[\s\S]*?>(.*?)</a>')
+        compile(r'<span itemprop="author" data-type="works">([\s\S]*?)</span>'),
+        compile(r'<a[^>]*?>(.*?)</a>')
     ]
     # 登場人物
     pattern_html_album_actors = [
-        compile('<span itemprop="author" data-type="actor">([\s\S]*?)</span>'),
-        compile('<a[\s\S]*?>(.*?)</a>')
+        compile(r'<span itemprop="author" data-type="actor">([\s\S]*?)</span>'),
+        compile(r'<a[^>]*?>(.*?)</a>')
     ]
     # 标签
     pattern_html_album_tags = [
-        compile('<span itemprop="genre" data-type="tags">([\s\S]*?)</span>'),
-        compile('<a[\s\S]*?>(.*?)</a>')
+        compile(r'<span itemprop="genre" data-type="tags">([\s\S]*?)</span>'),
+        compile(r'<a[^>]*?>(.*?)</a>')
     ]
     # 作者
     pattern_html_album_authors = [
-        compile('作者： *<span itemprop="author" data-type="author">([\s\S]*?)</span>'),
-        compile("<a[\s\S]*?>(.*?)</a>"),
+        compile(r'作者： *<span itemprop="author" data-type="author">([\s\S]*?)</span>'),
+        compile(r"<a[^>]*?>(.*?)</a>"),
     ]
     # 點擊喜歡
-    pattern_html_album_likes = compile('<span id="albim_likes_\d+">(.*?)</span>')
+    pattern_html_album_likes = compile(r'<span id="albim_likes_\d+">(.*?)</span>')
     # 觀看
-    pattern_html_album_views = compile('<span>(.*?)</span> (次觀看|观看次数)')
+    pattern_html_album_views = compile(r'<span>(.*?)</span> (次觀看|观看次数)')
     # 評論(div)
-    pattern_html_album_comment_count = compile('<div class="badge"\n? *id="total_video_comments">(\d+)</div>'), 0
+    pattern_html_album_comment_count = compile(r'<div class="badge"[^>]*?id="total_video_comments">(\d+)</div>'), 0
 
     @classmethod
     def parse_to_jm_domain(cls, text: str):
-        if text.startswith("https"):
+        if text.startswith(JmModuleConfig.PROT):
             return cls.pattern_jm_domain.search(text)[1]
 
         return text
 
     @classmethod
-    def parse_to_photo_id(cls, text) -> str:
+    def parse_to_jm_id(cls, text) -> str:
         if isinstance(text, int):
             return str(text)
 
-        if not isinstance(text, str):
-            raise JmModuleConfig.exception(f"无法解析jm车号, 参数类型为: {type(text)}")
+        ExceptionTool.require_true(isinstance(text, str), f"无法解析jm车号, 参数类型为: {type(text)}")
 
         # 43210
         if text.isdigit():
             return text
 
         # Jm43210
-        if len(text) <= 2:
-            raise JmModuleConfig.exception(f"无法解析jm车号, 文本为: {text}")
+        ExceptionTool.require_true(len(text) >= 2, f"无法解析jm车号, 文本太短: {text}")
 
         # text: JM12341
         c0 = text[0]
@@ -87,13 +85,8 @@ class JmcomicText:
         else:
             # https://xxx/photo/412038
             match = cls.pattern_jm_pa_id.search(text)
-            if match is None:
-                raise JmModuleConfig.exception(f"无法解析jm车号, 文本为: {text}")
+            ExceptionTool.require_true(match is not None, f"无法解析jm车号, 文本为: {text}")
             return match[2]
-
-    @classmethod
-    def parse_to_album_id(cls, text) -> str:
-        return cls.parse_to_photo_id(text)
 
     @classmethod
     def analyse_jm_pub_html(cls, html: str, domain_keyword=('jm', 'comic')) -> List[str]:
@@ -122,7 +115,7 @@ class JmcomicText:
 
     @classmethod
     def analyse_jm_search_html(cls, html: str) -> JmSearchPage:
-        return JmcomicSearchTool.parse_html_to_page(html)
+        return JmPageTool.parse_html_to_search_page(html)
 
     @classmethod
     def reflect_new_instance(cls, html: str, cls_field_prefix: str, clazz: type):
@@ -169,11 +162,10 @@ class JmcomicText:
 
             if field_value is None:
                 if default is None:
-                    JmModuleConfig.raise_regex_error_executor(
+                    ExceptionTool.raises_regex(
                         f"文本没有匹配上字段：字段名为'{field_name}'，pattern: [{pattern}]",
-                        html,
-                        field_name,
-                        pattern
+                        html=html,
+                        pattern=pattern,
                     )
                 else:
                     field_value = default
@@ -182,14 +174,6 @@ class JmcomicText:
             field_dict[field_name] = field_value
 
         return clazz(**field_dict)
-
-    @classmethod
-    def format_photo_url(cls, photo_id, domain=None):
-        return cls.format_url(f'/photo/{cls.parse_to_photo_id(photo_id)}', domain)
-
-    @classmethod
-    def format_album_url(cls, album_id, domain=None):
-        return cls.format_url(f'/album/{cls.parse_to_album_id(album_id)}', domain)
 
     @classmethod
     def format_url(cls, path, domain):
@@ -219,57 +203,109 @@ class JmcomicText:
         name = match[1]
         value = os.getenv(name, None)
         assert value is not None, f"未配置环境变量: {name}"
-        return os.path.abspath(value)
+        return value
 
     dsl_replacer = DSLReplacer()
 
     @classmethod
     def parse_to_abspath(cls, dsl_text: str) -> str:
-        path = cls.dsl_replacer.parse_dsl_text(dsl_text)
-        return os.path.abspath(path)
+        return os.path.abspath(cls.parse_dsl_text(dsl_text))
+
+    @classmethod
+    def parse_dsl_text(cls, dsl_text: str) -> str:
+        return cls.dsl_replacer.parse_dsl_text(dsl_text)
 
 
 # 支持dsl: #{???} -> os.getenv(???)
-JmcomicText.dsl_replacer.add_dsl_and_replacer('\$\{(.*?)\}', JmcomicText.match_os_env)
+JmcomicText.dsl_replacer.add_dsl_and_replacer(r'\$\{(.*?)\}', JmcomicText.match_os_env)
 
 
-class JmcomicSearchTool:
+class PatternTool:
+
+    @classmethod
+    def match_or_default(cls, html: str, pattern: Pattern, default):
+        match = pattern.search(html)
+        return default if match is None else match[1]
+
+    @classmethod
+    def require_match(cls, html: str, pattern: Pattern, msg, rindex=1):
+        match = pattern.search(html)
+        if match is not None:
+            return match[rindex]
+
+        ExceptionTool.raises_regex(
+            msg,
+            html=html,
+            pattern=pattern,
+        )
+
+    @classmethod
+    def require_not_match(cls, html: str, pattern: Pattern, *, msg_func):
+        match = pattern.search(html)
+        if match is None:
+            return
+
+        ExceptionTool.raises_regex(
+            msg_func(match),
+            html=html,
+            pattern=pattern,
+        )
+
+
+class JmPageTool:
     # 用来缩减html的长度
-    pattern_html_search_shorten_for = compile('<div class="well well-sm">([\s\S]*)<div class="row">')
+    pattern_html_search_shorten_for = compile(r'<div class="well well-sm">([\s\S]*)<div class="row">')
 
     # 用来提取搜索页面的的album的信息
     pattern_html_search_album_info_list = compile(
-        '<a href="/album/(\d+)/.+"[\s\S]*?'
-        'title="(.*?)"[\s\S]*?'
-        '(<div class="label-category" style="">'
-        '\n(.*)\n</div>\n<div class="label-sub" style=" ">'
-        '(.*?)\n<[\s\S]*?)?'
-        '<div class="title-truncate tags .*>\n'
-        '(<a[\s\S]*?) </div>'
+        r'<a href="/album/(\d+)/.+"[\s\S]*?'
+        r'title="(.*?)"[\s\S]*?'
+        r'(<div class="label-category" style="">'
+        r'\n(.*)\n</div>\n<div class="label-sub" style=" ">'
+        r'(.*?)\n<[\s\S]*?)?'
+        r'<div class="title-truncate tags .*>\n'
+        r'(<a[\s\S]*?) </div>'
     )
 
     # 用来查找tag列表
-    pattern_html_search_tag_list = compile('<a href=".*?">(.*?)</a>')
+    pattern_html_search_tag_list = compile(r'<a href=".*?">(.*?)</a>')
 
     # 查找错误，例如 [错误，關鍵字過短，請至少輸入兩個字以上。]
-    pattern_html_search_error = compile('<fieldset>\n<legend>(.*?)</legend>\n<div class=.*?>\n(.*?)\n</div>\n</fieldset>')
+    pattern_html_search_error = compile(r'<fieldset>\n<legend>(.*?)</legend>\n<div class=.*?>\n(.*?)\n</div>\n</fieldset>')
+
+    pattern_html_search_total = compile(r'<span class="text-white">(\d+)</span> A漫.'), 0
+
+    # 收藏页面的本子结果
+    pattern_html_favorite_content = compile(
+        r'<div id="favorites_album_[^>]*?>[\s\S]*?'
+        r'<a href="/album/(\d+)/">[\s\S]*?'
+        r'<div class="video-title title-truncate">([^<]*?)'
+        r'</div>'
+    )
+
+    # 收藏页面的文件夹收藏总数
+    pattern_html_favorite_total = compile(r' : (\d+)[^/]*/\D*(\d+)')
 
     @classmethod
-    def parse_html_to_page(cls, html: str) -> JmSearchPage:
-        # 检查是否失败
-        match = cls.pattern_html_search_error.search(html)
-        if match is not None:
-            topic, reason = match[1], match[2]
-            JmModuleConfig.raise_regex_error_executor(f'{topic}: {reason}', html)
+    def parse_html_to_search_page(cls, html: str) -> JmSearchPage:
+        # 1. 检查是否失败
+        PatternTool.require_not_match(
+            html,
+            cls.pattern_html_search_error,
+            msg_func=lambda match: '{}: {}'.format(match[1], match[2])
+        )
 
-        # 缩小文本范围
-        match = cls.pattern_html_search_shorten_for.search(html)
-        if match is None:
-            JmModuleConfig.raise_regex_error_executor('未匹配到搜索结果', html)
-        html = match[0]
+        # 2. 缩小文本范围
+        html = PatternTool.require_match(
+            html,
+            cls.pattern_html_search_shorten_for,
+            msg='未匹配到搜索结果',
+        )
 
-        # 提取结果
+        # 3. 提取结果
         content = []  # content这个名字来源于api版搜索返回值
+        total = int(PatternTool.match_or_default(html, *cls.pattern_html_search_total))  # 总结果数
+
         album_info_list = cls.pattern_html_search_album_info_list.findall(html)
 
         for (album_id, title, _, label_category, label_sub, tag_text) in album_info_list:
@@ -281,10 +317,30 @@ class JmcomicSearchTool:
                 }
             ))
 
-        return JmSearchPage(content)
+        return JmSearchPage(content, total)
 
     @classmethod
-    def parse_api_resp_to_page(cls, data: DictModel) -> JmSearchPage:
+    def parse_html_to_favorite_page(cls, html: str) -> JmFavoritePage:
+        total = int(PatternTool.require_match(
+            html,
+            cls.pattern_html_favorite_total,
+            '未匹配到收藏夹的本子总数',
+        ))
+
+        # 收藏页面的本子结果
+        content = cls.pattern_html_favorite_content.findall(html)
+        content = [
+            (aid, {'name': atitle})
+            for aid, atitle in content
+        ]
+
+        # 暂不实现匹配文件夹列表，感觉没什么意义..
+        folder_list = []
+
+        return JmFavoritePage(content, folder_list, total)
+
+    @classmethod
+    def parse_api_to_search_page(cls, data: DictModel) -> JmSearchPage:
         """
         model_data: {
           "search_query": "MANA",
@@ -308,22 +364,71 @@ class JmcomicSearchTool:
           ]
         }
         """
+        total: int = int(data.total)
+        content = cls.adapt_content(data.content)
+        return JmSearchPage(content, total)
 
+    @classmethod
+    def parse_api_to_favorite_page(cls, data: DictModel) -> JmFavoritePage:
+        """
+        {
+          "list": [
+            {
+              "id": "363859",
+              "author": "紺菓",
+              "description": "",
+              "name": "[無邪氣漢化組] (C99) [紺色果實 (紺菓)] サレンの樂しい夢 (プリンセスコネクト!Re:Dive) [中國翻譯]",
+              "latest_ep": null,
+              "latest_ep_aid": null,
+              "image": "",
+              "category": {
+                "id": "1",
+                "title": "同人"
+              },
+              "category_sub": {
+                "id": "1",
+                "title": "同人"
+              }
+            }
+          ],
+          "folder_list": [
+            {
+              "0": "123",
+              "FID": "123",
+              "1": "456",
+              "UID": "456",
+              "2": "文件夹名",
+              "name": "文件夹名"
+            }
+          ],
+          "total": "87",
+          "count": 20
+        }
+        """
+        total: int = int(data.total)
+        # count: int = int(data.count)
+        content = cls.adapt_content(data.list)
+        folder_list = data.folder_list
+
+        return JmFavoritePage(content, folder_list, total)
+
+    @classmethod
+    def adapt_content(cls, content):
         def adapt_item(item: DictModel):
             item: dict = item.src_dict
             item.setdefault('tag_list', [])
             return item
 
         content = [
-            (item.id, adapt_item(item))
-            for item in data.content
+            (item.id, adapt_item(item)) for item in content
         ]
-
-        return JmSearchPage(content)
+        return content
 
 
 class JmApiAdaptTool:
     """
+    本类负责把移动端的api返回值，适配为标准的实体类
+
     # album
     {
       "id": 123,
@@ -395,9 +500,9 @@ class JmApiAdaptTool:
         JmPhotoDetail: [
             'name',
             'series_id',
-            ('tags', 'keywords'),
+            'tags',
             ('id', 'photo_id'),
-            ('images', 'page_arr')
+            ('images', 'page_arr'),
 
         ]
     }
@@ -429,7 +534,7 @@ class JmApiAdaptTool:
             if issubclass(clazz, k):
                 return v
 
-        raise AssertionError(clazz)
+        ExceptionTool.raises(f'不支持的类型: {clazz}')
 
     @classmethod
     def post_adapt_album(cls, data: dict, _clazz: type, fields: dict):
@@ -447,16 +552,21 @@ class JmApiAdaptTool:
 
     @classmethod
     def post_adapt_photo(cls, data: dict, _clazz: type, fields: dict):
-        for chapter in data['series']:
+        # 1. 获取sort字段，如果data['series']中没有，使用默认值1
+        sort = 1
+        series: list = data['series']  # series中的sort从1开始
+        for chapter in series:
             chapter = DictModel(chapter)
             if int(chapter.id) == int(data['id']):
-                fields['sort'] = chapter.sort
+                sort = chapter.sort
                 break
 
-        fields['scramble_id'] = '0'
+        fields['sort'] = sort
+        import random
+        fields['data_original_domain'] = random.choice(JmModuleConfig.DOMAIN_IMAGE_LIST)
 
 
-class JmImageSupport:
+class JmImageTool:
 
     @classmethod
     def save_resp_img(cls, resp: Any, filepath: str, need_convert=True):
@@ -465,9 +575,9 @@ class JmImageSupport:
         如果需要改变图片的文件格式，比如 .jpg → .png，则需要指定参数 neet_convert=True.
         如果不需要改变图片的文件格式，使用 need_convert=False，可以跳过PIL解析图片，效率更高.
 
-        @param resp: HTTP响应对象
-        @param filepath: 图片文件路径
-        @param need_convert: 是否转换图片
+        :param resp: HTTP响应对象
+        :param filepath: 图片文件路径
+        :param need_convert: 是否转换图片
         """
         if need_convert is False:
             cls.save_directly(resp, filepath)
@@ -479,8 +589,8 @@ class JmImageSupport:
         """
         保存图片
 
-        @param image: PIL.Image对象
-        @param filepath: 保存文件路径
+        :param image: PIL.Image对象
+        :param filepath: 保存文件路径
         """
         image.save(filepath)
 
@@ -497,9 +607,9 @@ class JmImageSupport:
                         ) -> None:
         """
         解密图片并保存
-        @param num: 分割数，可以用 cls.calculate_segmentation_num 计算
-        @param img_src: 原始图片
-        @param decoded_save_path: 解密图片的保存路径
+        :param num: 分割数，可以用 cls.calculate_segmentation_num 计算
+        :param img_src: 原始图片
+        :param decoded_save_path: 解密图片的保存路径
         """
 
         # 无需解密，直接保存
@@ -549,11 +659,11 @@ class JmImageSupport:
 
         if aid < scramble_id:
             return 0
-        elif aid < JmModuleConfig.SCRAMBLE_10:
+        elif aid < JmMagicConstants.SCRAMBLE_268850:
             return 10
         else:
             import hashlib
-            x = 10 if aid < JmModuleConfig.SCRAMBLE_NUM_8 else 8
+            x = 10 if aid < JmMagicConstants.SCRAMBLE_421926 else 8
             s = f"{aid}{filename}"  # 拼接
             s = s.encode()
             s = hashlib.md5(s).hexdigest()
@@ -569,7 +679,7 @@ class JmImageSupport:
         """
         return cls.get_num(
             scramble_id,
-            aid=JmcomicText.parse_to_photo_id(url),
+            aid=JmcomicText.parse_to_jm_id(url),
             filename=of_file_name(url, True),
         )
 
@@ -579,3 +689,83 @@ class JmImageSupport:
         获得图片分割数
         """
         return cls.get_num(detail.scramble_id, detail.aid, detail.img_file_name)
+
+
+class ExceptionTool:
+    """
+    抛异常的工具
+    1: 能简化 if-raise 语句的编写
+    2: 有更好的上下文信息传递方式
+    """
+
+    EXTRA_KEY_RESP = 'resp'
+    EXTRA_KEY_HTML = 'html'
+    EXTRA_KEY_RE_PATTERN = 'pattern'
+
+    @classmethod
+    def raises(cls, msg: str, extra: dict = None):
+        if extra is None:
+            extra = {}
+
+        JmModuleConfig.raise_exception_executor(msg, extra)
+
+    @classmethod
+    def raises_regex(cls,
+                     msg: str,
+                     html: str,
+                     pattern: Pattern,
+                     ):
+        cls.raises(
+            msg, {
+                cls.EXTRA_KEY_HTML: html,
+                cls.EXTRA_KEY_RE_PATTERN: pattern,
+            }
+        )
+
+    @classmethod
+    def raises_resp(cls,
+                    msg: str,
+                    resp,
+                    ):
+        cls.raises(
+            msg, {
+                cls.EXTRA_KEY_RESP: resp
+            }
+        )
+
+    @classmethod
+    def raise_missing(cls,
+                      resp,
+                      orig_req_url=None,
+                      ):
+        """
+        抛出本子/章节的异常
+        :param resp: 响应对象
+        :param orig_req_url: 原始请求url，可不传
+        """
+        if orig_req_url is None:
+            orig_req_url = resp.url
+
+        req_type = "本子" if "album" in orig_req_url else "章节"
+        cls.raises_resp((
+            f'请求的{req_type}不存在！({orig_req_url})\n'
+            '原因可能为:\n'
+            f'1. id有误，检查你的{req_type}id\n'
+            '2. 该漫画只对登录用户可见，请配置你的cookies，或者使用移动端Client（api）\n'
+        ), resp)
+
+    @classmethod
+    def require_true(cls, case: bool, msg: str):
+        if case:
+            return
+
+        cls.raises(msg)
+
+    @classmethod
+    def replace_old_exception_executor(cls, raises: Callable[[Callable, str, dict], None]):
+        old = JmModuleConfig.raise_exception_executor
+
+        def new(msg, extra):
+            raises(old, msg, extra)
+
+        JmModuleConfig.raise_exception_executor = new
