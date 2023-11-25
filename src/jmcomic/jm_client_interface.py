@@ -9,30 +9,46 @@ Response Entity
 DictModel = AdvancedEasyAccessDict
 
 
-class JmResp(CommonResp):
+class JmResp:
+
+    def __init__(self, resp):
+        ExceptionTool.require_true(not isinstance(resp, JmResp), f'重复包装: {resp}')
+        self.resp = resp
 
     @property
     def is_success(self) -> bool:
         return self.http_code == 200 and len(self.content) != 0
 
-    def json(self, **kwargs) -> Dict:
-        raise NotImplementedError
+    @property
+    def is_not_success(self) -> bool:
+        return not self.is_success
 
-    def model(self) -> DictModel:
-        return DictModel(self.json())
+    @property
+    def content(self):
+        return self.resp.content
+
+    @property
+    def http_code(self):
+        return self.resp.status_code
+
+    @property
+    def text(self) -> str:
+        return self.resp.text
+
+    @property
+    def url(self) -> str:
+        return self.resp.url
 
     def require_success(self):
         if self.is_not_success:
-            ExceptionTool.raises_resp(self.text, self.resp)
+            ExceptionTool.raises_resp(self.text, self)
 
 
 class JmImageResp(JmResp):
 
-    def json(self, **kwargs) -> Dict:
-        raise NotImplementedError
-
     def require_success(self):
-        ExceptionTool.require_true(self.is_success, self.get_error_msg())
+        if self.is_not_success:
+            ExceptionTool.raises_resp(self.get_error_msg(), self)
 
     def get_error_msg(self):
         msg = f'禁漫图片获取失败: [{self.url}]'
@@ -66,47 +82,29 @@ class JmImageResp(JmResp):
             )
 
 
-class JmApiResp(JmResp):
+class JmJsonResp(JmResp):
 
-    @classmethod
-    def wrap(cls, resp, key_ts):
-        ExceptionTool.require_true(not isinstance(resp, JmApiResp), f'重复包装: {resp}')
+    def json(self) -> Dict:
+        return self.resp.json()
 
-        return cls(resp, key_ts)
+    def model(self) -> DictModel:
+        return DictModel(self.json())
 
-    def __init__(self, resp, key_ts):
+
+class JmApiResp(JmJsonResp):
+
+    def __init__(self, resp, ts: str):
         super().__init__(resp)
-        self.key_ts = key_ts
-        self.cache_decode_data = None
+        self.ts = ts
 
     @property
     def is_success(self) -> bool:
         return super().is_success and self.json()['code'] == 200
 
-    @staticmethod
-    def parse_data(text, time) -> str:
-        # 1. base64解码
-        import base64
-        data = base64.b64decode(text)
-
-        # 2. AES-ECB解密
-        # key = 时间戳拼接 '18comicAPPContent' 的md5
-        import hashlib
-        key = hashlib.md5(f"{time}18comicAPPContent".encode("utf-8")).hexdigest().encode("utf-8")
-        from Crypto.Cipher import AES
-        data = AES.new(key, AES.MODE_ECB).decrypt(data)
-
-        # 3. 移除末尾的一些特殊字符
-        data = data[:-data[-1]]
-
-        # 4. 解码为字符串 (json)
-        res = data.decode('utf-8')
-        return res
-
     @property
-    @field_cache('__cache_decoded_data__')
+    @field_cache()
     def decoded_data(self) -> str:
-        return self.parse_data(self.encoded_data, self.key_ts)
+        return JmCryptoTool.decode_resp_data(self.encoded_data, self.ts)
 
     @property
     def encoded_data(self) -> str:
@@ -118,10 +116,6 @@ class JmApiResp(JmResp):
         from json import loads
         return loads(self.decoded_data)
 
-    @field_cache('__cache_json__')
-    def json(self, **kwargs) -> Dict:
-        return self.resp.json()
-
     @property
     def model_data(self) -> DictModel:
         self.require_success()
@@ -129,12 +123,12 @@ class JmApiResp(JmResp):
 
 
 # album-comment
-class JmAcResp(JmResp):
+class JmAlbumCommentResp(JmJsonResp):
 
     def is_success(self) -> bool:
         return super().is_success and self.json()['err'] is False
 
-    def json(self, **kwargs) -> Dict:
+    def json(self) -> Dict:
         return self.resp.json()
 
 
@@ -192,9 +186,13 @@ class JmDetailClient:
 class JmUserClient:
 
     def login(self,
-              username,
-              password,
+              username: str,
+              password: str,
               ):
+        """
+        1. 返回response响应对象
+        2. 保证当前client拥有登录cookies
+        """
         raise NotImplementedError
 
     def album_comment(self,
@@ -204,7 +202,7 @@ class JmUserClient:
                       status='true',
                       comment_id=None,
                       **kwargs,
-                      ) -> JmAcResp:
+                      ) -> JmAlbumCommentResp:
         """
         评论漫画/评论回复
         :param video_id: album_id/photo_id

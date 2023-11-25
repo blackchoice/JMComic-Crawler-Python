@@ -185,11 +185,9 @@ class FindUpdatePlugin(JmOptionPlugin):
     def invoke(self, **kwargs) -> None:
         self.download_album_with_find_update(kwargs or {})
 
-    def download_album_with_find_update(self, dic):
+    def download_album_with_find_update(self, dic: Dict[str, int]):
         from .api import download_album
         from .jm_downloader import JmDownloader
-
-        dic: Dict[str, int]
 
         # 带入漫画id, 章节id(第x章)，寻找该漫画下第x章节後的所有章节Id
         def find_update(album: JmAlbumDetail):
@@ -456,7 +454,7 @@ class LogTopicFilterPlugin(JmOptionPlugin):
         if whitelist is not None:
             whitelist = set(whitelist)
 
-        old_jm_log = JmModuleConfig.log_executor
+        old_jm_log = JmModuleConfig.executor_log
 
         def new_jm_log(topic, msg):
             if whitelist is not None and topic not in whitelist:
@@ -464,7 +462,7 @@ class LogTopicFilterPlugin(JmOptionPlugin):
 
             old_jm_log(topic, msg)
 
-        JmModuleConfig.log_executor = new_jm_log
+        JmModuleConfig.executor_log = new_jm_log
 
 
 class AutoSetBrowserCookiesPlugin(JmOptionPlugin):

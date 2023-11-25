@@ -11,20 +11,19 @@ class AbstractJmClient(
 
     def __init__(self,
                  postman: Postman,
-                 retry_times: int,
-                 domain=None,
-                 fallback_domain_list=None,
+                 domain_list: List[str],
+                 retry_times=0,
                  ):
+        """
+        创建JM客户端
+
+        :param postman: 负责实现HTTP请求的对象，持有cookies、headers、proxies等信息
+        :param domain_list: 禁漫域名
+        :param retry_times: 重试次数
+        """
         super().__init__(postman)
         self.retry_times = retry_times
-
-        if fallback_domain_list is None:
-            fallback_domain_list = []
-
-        if domain is not None:
-            fallback_domain_list.insert(0, domain)
-
-        self.domain_list = fallback_domain_list
+        self.domain_list = domain_list
         self.CLIENT_CACHE = None
         self.enable_cache()
         self.after_init()
@@ -98,6 +97,9 @@ class AbstractJmClient(
             resp = request(url, **kwargs)
             return judge(resp)
         except Exception as e:
+            if self.retry_times == 0:
+                raise e
+
             self.before_retry(e, kwargs, retry_count, url)
 
         if retry_count < self.retry_times:
@@ -190,7 +192,7 @@ class AbstractJmClient(
 
     # noinspection PyMethodMayBeStatic
     def decode(self, url: str):
-        if not JmModuleConfig.decode_url_when_logging or '/search/' not in url:
+        if not JmModuleConfig.flag_decode_url_when_logging or '/search/' not in url:
             return url
 
         from urllib.parse import unquote
@@ -216,6 +218,7 @@ class JmHtmlClient(AbstractJmClient):
         # 一并获取该章节的所处本子
         # todo: 可优化，获取章节所在本子，其实不需要等待章节获取完毕后。
         #  可以直接调用 self.get_album_detail(photo_id)，会重定向返回本子的HTML
+        # (had polished by FutureClientProxy)
         if fetch_album is True:
             photo.from_album = self.get_album_detail(photo.album_id)
 
@@ -370,7 +373,7 @@ class JmHtmlClient(AbstractJmClient):
                       status='true',
                       comment_id=None,
                       **kwargs,
-                      ) -> JmAcResp:
+                      ) -> JmAlbumCommentResp:
         data = {
             'video_id': video_id,
             'comment': comment,
@@ -391,11 +394,11 @@ class JmHtmlClient(AbstractJmClient):
                )
 
         resp = self.post('/ajax/album_comment',
-                         headers=JmModuleConfig.album_comment_headers,
+                         headers=self.album_comment_headers,
                          data=data,
                          )
 
-        ret = JmAcResp(resp)
+        ret = JmAlbumCommentResp(resp)
         jm_log('album.comment', f'{video_id}: [{comment}] ← ({ret.model().cid})')
 
         return ret
@@ -465,6 +468,26 @@ class JmHtmlClient(AbstractJmClient):
             f'原因为: [{error_msg}], '
             + (f'URL=[{url}]' if url is not None else '')
         )
+
+    album_comment_headers = {
+        'authority': '18comic.vip',
+        'accept': 'application/json, text/javascript, */*; q=0.01',
+        'accept-language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        'cache-control': 'no-cache',
+        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'origin': 'https://18comic.vip',
+        'pragma': 'no-cache',
+        'referer': 'https://18comic.vip/album/248965/',
+        'sec-ch-ua': '"Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/114.0.0.0 Safari/537.36',
+        'x-requested-with': 'XMLHttpRequest',
+    }
 
 
 # 基于禁漫移动端（APP）实现的JmClient
@@ -555,7 +578,7 @@ class JmApiClient(AbstractJmClient):
             url,
             params={
                 'id': apid,
-            }
+            },
         )
 
         self.require_resp_success(resp, url)
@@ -570,11 +593,13 @@ class JmApiClient(AbstractJmClient):
         resp = self.req_api(
             self.API_SCRAMBLE,
             params={
-                "id": photo_id,
-                "mode": "vertical",
-                "page": "0",
-                "app_img_shunt": "1",
-            }
+                'id': photo_id,
+                'mode': 'vertical',
+                'page': '0',
+                'app_img_shunt': '1',
+                'express': 'off',
+                'v': time_stamp(),
+            },
         )
 
         scramble_id = PatternTool.match_or_default(resp.text,
@@ -594,7 +619,7 @@ class JmApiClient(AbstractJmClient):
         2. album
         如果都需要获取，会排队，效率低
 
-        todo: 改进实现
+        todo: 改进实现 (had polished by FutureClientProxy)
         1. 直接开两个线程跑
         2. 开两个线程，但是开之前检查重复性
         3. 线程池，也要检查重复性
@@ -658,9 +683,6 @@ class JmApiClient(AbstractJmClient):
     def login(self,
               username,
               password,
-              refresh_client_cookies=True,
-              id_remember='on',
-              login_remember='on',
               ) -> JmApiResp:
         """
         {
@@ -715,21 +737,41 @@ class JmApiClient(AbstractJmClient):
         return JmPageTool.parse_api_to_favorite_page(resp.model_data)
 
     def req_api(self, url, get=True, **kwargs) -> JmApiResp:
-        # set headers
-        headers, key_ts = self.headers_key_ts
-        kwargs['headers'] = headers
+        ts = self.decide_headers_and_ts(kwargs, url)
 
         if get:
             resp = self.get(url, **kwargs)
         else:
             resp = self.post(url, **kwargs)
 
-        return JmApiResp.wrap(resp, key_ts)
+        return JmApiResp(resp, ts)
 
-    @property
-    def headers_key_ts(self):
-        key_ts = time_stamp()
-        return JmModuleConfig.new_api_headers(key_ts), key_ts
+    # noinspection PyMethodMayBeStatic
+    def decide_headers_and_ts(self, kwargs, url):
+        # 获取时间戳
+        if url == self.API_SCRAMBLE:
+            # /chapter_view_template
+            # 这个接口很特殊，用的密钥 18comicAPPContent 而不是 18comicAPP
+            # 如果用后者，则会返回403信息
+            ts = time_stamp()
+            token, tokenparam = JmCryptoTool.token_and_tokenparam(ts, secret=JmMagicConstants.APP_TOKEN_SECRET_2)
+
+        elif JmModuleConfig.flag_use_fix_timestamp:
+            ts, token, tokenparam = JmModuleConfig.get_fix_ts_token_tokenparam()
+
+        else:
+            ts = time_stamp()
+            token, tokenparam = JmCryptoTool.token_and_tokenparam(ts)
+
+        # 设置headers
+        headers = kwargs.get('headers', None) or JmMagicConstants.APP_HEADERS_TEMPLATE.copy()
+        headers.update({
+            'token': token,
+            'tokenparam': tokenparam,
+        })
+        kwargs['headers'] = headers
+
+        return ts
 
     @classmethod
     def require_resp_success(cls, resp: JmApiResp, orig_req_url: str):
@@ -745,11 +787,28 @@ class JmApiClient(AbstractJmClient):
         # 暂无
 
     def after_init(self):
-        # cookies = self.__class__.fetch_init_cookies(self)
-        # self.get_root_postman().get_meta_data()['cookies'] = cookies
+        # 保证拥有cookies，因为移动端要求必须携带cookies，否则会直接跳转同一本子【禁漫娘】
+        if JmModuleConfig.flag_api_client_require_cookies:
+            self.ensure_have_cookies()
 
-        self.get_root_postman().get_meta_data()['cookies'] = JmModuleConfig.get_cookies(self)
-        pass
+    from threading import Lock
+    client_init_cookies_lock = Lock()
+
+    def ensure_have_cookies(self):
+        if self.get_meta_data('cookies'):
+            return
+
+        with self.client_init_cookies_lock:
+            if self.get_meta_data('cookies'):
+                return
+
+            self['cookies'] = self.get_cookies()
+
+    @field_cache("APP_COOKIES", obj=JmModuleConfig)
+    def get_cookies(self):
+        resp = self.setting()
+        cookies = dict(resp.resp.cookies)
+        return cookies
 
 
 class FutureClientProxy(JmcomicClient):
@@ -772,12 +831,13 @@ class FutureClientProxy(JmcomicClient):
                      'set_cache_dict', 'get_cache_dict', 'set_domain_list', ]
 
     class FutureWrapper:
-        def __init__(self, future):
+        def __init__(self, future, after_done_callback):
             from concurrent.futures import Future
             future: Future
             self.future = future
             self.done = False
             self._result = None
+            self.after_done_callback = after_done_callback
 
         def result(self):
             if not self.done:
@@ -785,6 +845,7 @@ class FutureClientProxy(JmcomicClient):
                 self._result = result
                 self.done = True
                 self.future = None  # help gc
+                self.after_done_callback()
 
             return self._result
 
@@ -820,7 +881,9 @@ class FutureClientProxy(JmcomicClient):
             if cache_key in self.future_dict:
                 return self.future_dict[cache_key]
 
-            future = self.FutureWrapper(self.executors.submit(task))
+            future = self.FutureWrapper(self.executors.submit(task),
+                                        after_done_callback=lambda: self.future_dict.pop(cache_key, None)
+                                        )
             self.future_dict[cache_key] = future
             return future
 
