@@ -115,7 +115,7 @@ class JmDownloader(DownloadCallback):
         """
         调度本子/章节的下载
         """
-        iter_objs = self.filter_iter_objs(iter_objs)
+        iter_objs = self.do_filter(iter_objs)
         count_real = len(iter_objs)
 
         if count_real == 0:
@@ -136,14 +136,14 @@ class JmDownloader(DownloadCallback):
             )
 
     # noinspection PyMethodMayBeStatic
-    def filter_iter_objs(self, detail: DetailEntity):
+    def do_filter(self, detail: DetailEntity):
         """
         该方法可用于过滤本子/章节，默认不会做过滤。
         例如:
         只想下载 本子的最新一章，返回 [album[-1]]
         只想下载 章节的前10张图片，返回 [photo[:10]]
 
-        :param detail: 可能是本子或者章节，需要自行使用 isinstance / is_xxx 判断
+        :param detail: 可能是本子或者章节，需要自行使用 isinstance / detail.is_xxx 判断
         :returns: 只想要下载的 本子的章节 或 章节的图片
         """
         return detail
@@ -181,6 +181,14 @@ class JmDownloader(DownloadCallback):
             downloader=self,
         )
 
+    def after_photo(self, photo: JmPhotoDetail):
+        super().after_photo(photo)
+        self.option.call_all_plugin(
+            'after_photo',
+            photo=photo,
+            downloader=self,
+        )
+
     def after_image(self, image: JmImageDetail, img_save_path):
         super().after_image(image, img_save_path)
         photo = image.from_photo
@@ -198,3 +206,59 @@ class JmDownloader(DownloadCallback):
             jm_log('dler.exception',
                    f'{self.__class__.__name__} Exit with exception: {exc_type, exc_val}'
                    )
+
+    @classmethod
+    def use(cls, *args, **kwargs):
+        """
+        让本类替换JmModuleConfig.CLASS_DOWNLOADER
+        """
+        JmModuleConfig.CLASS_DOWNLOADER = cls
+
+
+class DoNotDownloadImage(JmDownloader):
+    """
+    本类仅用于测试
+
+    用法：
+
+    JmModuleConfig.CLASS_DOWNLOADER = DoNotDownloadImage
+    """
+
+    def download_by_image_detail(self, image: JmImageDetail, client: JmcomicClient):
+        # ensure make dir
+        self.option.decide_image_filepath(image)
+        pass
+
+
+class JustDownloadSpecificCountImage(JmDownloader):
+    from threading import Lock
+
+    count_lock = Lock()
+    count = 0
+
+    def __init__(self, option: JmOption) -> None:
+        super().__init__(option)
+
+    def download_by_image_detail(self, image: JmImageDetail, client: JmcomicClient):
+        # ensure make dir
+        self.option.decide_image_filepath(image)
+
+        if self.try_countdown():
+            return super().download_by_image_detail(image, client)
+
+    def try_countdown(self):
+        if self.count < 0:
+            return False
+
+        with self.count_lock:
+            if self.count < 0:
+                return False
+
+            self.count -= 1
+
+            return self.count >= 0
+
+    @classmethod
+    def use(cls, count):
+        cls.count = count
+        super().use()

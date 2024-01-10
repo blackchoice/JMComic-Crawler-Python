@@ -22,11 +22,27 @@ class JmMagicConstants:
     ORDER_BY_PICTURE = 'mp'
     ORDER_BY_LIKE = 'tf'
 
+    ORDER_MONTH_RANKING = 'mv_m'
+    ORDER_WEEK_RANKING = 'mv_w'
+    ORDER_DAY_RANKING = 'mv_t'
+
     # 搜索参数-时间段
     TIME_TODAY = 't'
     TIME_WEEK = 'w'
     TIME_MONTH = 'm'
     TIME_ALL = 'a'
+
+    # 全部, 同人, 单本, 短篇, 其他, 韩漫, 美漫, cosplay, 3D
+    # category = ["0", "doujin", "single", "short", "another", "hanman", "meiman", "doujin_cosplay", "3D"]
+    CATEGORY_ALL = '0'
+    CATEGORY_DOUJIN = 'doujin'
+    CATEGORY_SINGLE = 'single'
+    CATEGORY_SHORT = 'short'
+    CATEGORY_ANOTHER = 'another'
+    CATEGORY_HANMAN = 'hanman'
+    CATEGORY_MEIMAN = 'meiman'
+    CATEGORY_DOUJIN_COSPLAY = 'doujin_cosplay'
+    CATEGORY_3D = '3D'
 
     # 分页大小
     PAGE_SIZE_SEARCH = 80
@@ -44,7 +60,7 @@ class JmMagicConstants:
     APP_TOKEN_SECRET = '18comicAPP'
     APP_TOKEN_SECRET_2 = '18comicAPPContent'
     APP_DATA_SECRET = '185Hcomic3PAPP7R'
-    APP_VERSION = '1.6.3'
+    APP_VERSION = '1.6.4'
     APP_HEADERS_TEMPLATE = {
         'Accept-Encoding': 'gzip',
         'user-agent': 'Mozilla/5.0 (Linux; Android 9; V1938CT Build/PQ3A.190705.09211555; wv) AppleWebKit/537.36 (KHTML, '
@@ -150,6 +166,14 @@ class JmModuleConfig:
     flag_enable_jm_log = True
     # log时解码url
     flag_decode_url_when_logging = True
+    # 当内置的版本号落后时，使用最新的禁漫app版本号
+    flag_use_version_newer_if_behind = False
+
+    # 关联dir_rule的自定义字段与对应的处理函数
+    # 例如:
+    # Amyname -> JmModuleConfig.AFIELD_ADVICE['myname'] = lambda album: "自定义名称"
+    AFIELD_ADVICE = dict()
+    PFIELD_ADVICE = dict()
 
     @classmethod
     def downloader_class(cls):
@@ -254,12 +278,13 @@ class JmModuleConfig:
         headers = JmMagicConstants.HTML_HEADERS_TEMPLATE.copy()
         headers.update({
             'authority': domain,
+            'origin': f'https://{domain}',
             'referer': f'https://{domain}',
         })
         return headers
 
     @classmethod
-    @field_cache("__fix_ts_token_tokenparam__")
+    @field_cache()
     def get_fix_ts_token_tokenparam(cls):
         ts = time_stamp()
         from .jm_toolkit import JmCryptoTool
@@ -290,9 +315,12 @@ class JmModuleConfig:
         return Postmans.new_postman(**kwargs)
 
     # option 相关的默认配置
+    # 一般情况下，建议使用option配置文件来定制配置
+    # 而如果只想修改几个简单常用的配置，也可以下方的DEFAULT_XXX属性
     JM_OPTION_VER = '2.1'
-    DEFAULT_CLIENT_IMPL = 'html'
-    DEFAULT_PROXIES = ProxyBuilder.system_proxy()  # use system proxy by default
+    DEFAULT_CLIENT_IMPL = 'api'  # 默认Client实现类型为网页端
+    DEFAULT_CLIENT_CACHE = True  # 默认开启Client缓存，缓存级别是level_option，详见CacheRegistry
+    DEFAULT_PROXIES = ProxyBuilder.system_proxy()  # 默认使用系统代理
 
     default_option_dict: dict = {
         'log': None,
@@ -317,7 +345,7 @@ class JmModuleConfig:
                 }
             },
             'impl': None,
-            'retry_times': 5
+            'retry_times': 5,
         },
         'plugins': {
             # 如果插件抛出参数校验异常，只log。（全局配置，可以被插件的局部配置覆盖）
@@ -349,7 +377,7 @@ class JmModuleConfig:
         # client cache
         client = option_dict['client']
         if client['cache'] is None:
-            client['cache'] = True
+            client['cache'] = cls.DEFAULT_CLIENT_CACHE
 
         # client impl
         if client['impl'] is None:

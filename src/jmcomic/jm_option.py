@@ -132,7 +132,7 @@ class DirRule:
 
         # Axxx or Pyyy
         key = 1 if rule[0] == 'A' else 2
-        solve_func = lambda detail, ref=rule[1:]: fix_windir_name(str(detail.get_dirname(ref)))
+        solve_func = lambda detail, ref=rule[1:]: fix_windir_name(str(DetailEntity.get_dirname(detail, ref)))
 
         # 保存缓存
         rule_solver = (key, solve_func, rule)
@@ -176,8 +176,6 @@ class JmOption:
                  plugins: Dict,
                  filepath=None,
                  ):
-        # 版本号
-        self.version = JmModuleConfig.JM_OPTION_VER
         # 路径规则配置
         self.dir_rule = DirRule(**dir_rule)
         # 客户端配置
@@ -189,7 +187,7 @@ class JmOption:
         # 其他配置
         self.filepath = filepath
 
-        self.call_all_plugin('after_init')
+        self.call_all_plugin('after_init', safe=True)
 
     """
     下面是decide系列方法，为了支持重写和增加程序动态性。
@@ -202,16 +200,6 @@ class JmOption:
     # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def decide_photo_batch_count(self, album: JmAlbumDetail):
         return self.download.threading.photo
-
-    def decide_image_save_dir(self, photo) -> str:
-        # 使用 self.dir_rule 决定 save_dir
-        save_dir = self.dir_rule.decide_image_save_dir(
-            photo.from_album,
-            photo
-        )
-
-        mkdir_if_not_exists(save_dir)
-        return save_dir
 
     def decide_album_dir(self, album: JmAlbumDetail) -> str:
         """
@@ -232,9 +220,21 @@ class JmOption:
                 break
 
         from os.path import join
+        # noinspection PyTypeChecker
         return join(*dir_layer)
 
-    def decide_image_suffix(self, image: JmImageDetail):
+    # noinspection PyMethodMayBeStatic
+    def decide_image_filename(self, image: JmImageDetail) -> str:
+        """
+        返回图片的文件名，不包含后缀
+        默认返回禁漫的图片文件名，例如：00001 (.jpg)
+        """
+        return image.filename_without_suffix
+
+    def decide_image_suffix(self, image: JmImageDetail) -> str:
+        """
+        返回图片的后缀，如果返回的后缀和原后缀不一致，则会进行图片格式转换
+        """
         # 动图则使用原后缀
         if image.is_gif:
             return image.img_file_suffix
@@ -242,11 +242,23 @@ class JmOption:
         # 非动图，以配置为先
         return self.download.image.suffix or image.img_file_suffix
 
+    def decide_image_save_dir(self, photo, ensure_exists=True) -> str:
+        # 使用 self.dir_rule 决定 save_dir
+        save_dir = self.dir_rule.decide_image_save_dir(
+            photo.from_album,
+            photo
+        )
+
+        if ensure_exists:
+            mkdir_if_not_exists(save_dir)
+
+        return save_dir
+
     def decide_image_filepath(self, image: JmImageDetail, consider_custom_suffix=True) -> str:
-        # 通过拼接生成绝对路径
+        # 以此决定保存文件夹、后缀、不包含后缀的文件名
         save_dir = self.decide_image_save_dir(image.from_photo)
         suffix = self.decide_image_suffix(image) if consider_custom_suffix else image.img_file_suffix
-        return os.path.join(save_dir, image.filename_without_suffix + suffix)
+        return os.path.join(save_dir, fix_windir_name(self.decide_image_filename(image)) + suffix)
 
     def decide_download_cache(self, _image: JmImageDetail) -> bool:
         return self.download.cache
@@ -267,22 +279,10 @@ class JmOption:
         return JmModuleConfig.option_default_dict()
 
     @classmethod
-    def default(cls, proxies=None, domain=None) -> 'JmOption':
+    def default(cls) -> 'JmOption':
         """
         使用默认的 JmOption
-        proxies, domain 为常用配置项，为了方便起见直接支持参数配置。
-        其他配置项建议还是使用配置文件
-        :param proxies: clash; 127.0.0.1:7890; v2ray
-        :param domain: 18comic.vip; ["18comic.vip"]
         """
-        if proxies is not None or domain is not None:
-            return cls.construct({
-                'client': {
-                    'domain': [domain] if isinstance(domain, str) else domain,
-                    'postman': {'meta_data': {'proxies': ProxyBuilder.build_by_str(proxies)}},
-                },
-            })
-
         return cls.construct({})
 
     @classmethod
@@ -296,6 +296,7 @@ class JmOption:
 
         # version
         version = dic.pop('version', None)
+        # noinspection PyTypeChecker
         if version is not None and float(version) >= float(JmModuleConfig.JM_OPTION_VER):
             # 版本号更高，跳过兼容代码
             return cls(**dic)
@@ -322,7 +323,7 @@ class JmOption:
 
     def deconstruct(self) -> Dict:
         return {
-            'version': self.version,
+            'version': JmModuleConfig.JM_OPTION_VER,
             'log': JmModuleConfig.flag_enable_jm_log,
             'dir_rule': {
                 'rule': self.dir_rule.rule_dsl,
@@ -363,7 +364,7 @@ class JmOption:
         """
         return self.new_jm_client(**kwargs)
 
-    def new_jm_client(self, domain=None, impl=None, cache=None, **kwargs) -> JmcomicClient:
+    def new_jm_client(self, domain_list=None, impl=None, cache=None, **kwargs) -> JmcomicClient:
         """
         创建新的Client（客户端），不同Client之间的元数据不共享
         """
@@ -371,10 +372,15 @@ class JmOption:
 
         # 所有需要用到的 self.client 配置项如下
         postman_conf: dict = deepcopy(self.client.postman.src_dict)  # postman dsl 配置
+
         meta_data: dict = postman_conf['meta_data']  # 元数据
+
         retry_times: int = self.client.retry_times  # 重试次数
+
         cache: str = cache if cache is not None else self.client.cache  # 启用缓存
+
         impl: str = impl or self.client.impl  # client_key
+
         if isinstance(impl, type):
             # eg: impl = JmHtmlClient
             # noinspection PyUnresolvedReferences
@@ -383,27 +389,29 @@ class JmOption:
         # start construct client
 
         # domain
-        def decide_domain():
-            domain_list: Union[List[str], DictModel, dict] = domain if domain is not None \
-                else self.client.domain  # 域名
+        def decide_domain_list():
+            nonlocal domain_list
 
-            if not isinstance(domain_list, list):
+            if domain_list is None:
+                domain_list = self.client.domain
+
+            if not isinstance(domain_list, (list, str)):
+                # dict
                 domain_list = domain_list.get(impl, [])
 
+            if isinstance(domain_list, str):
+                # multi-lines text
+                domain_list = str_to_list(domain_list)
+
+            # list or str
             if len(domain_list) == 0:
                 domain_list = self.decide_client_domain(impl)
 
             return domain_list
 
-        domain: List[str] = decide_domain()
-
         # support kwargs overwrite meta_data
         if len(kwargs) != 0:
             meta_data.update(kwargs)
-
-        # headers
-        if meta_data['headers'] is None:
-            meta_data['headers'] = self.decide_postman_headers(impl, domain[0])
 
         # postman
         postman = Postmans.create(data=postman_conf)
@@ -415,7 +423,7 @@ class JmOption:
 
         client: AbstractJmClient = clazz(
             postman=postman,
-            domain_list=decide_domain(),
+            domain_list=decide_domain_list(),
             retry_times=retry_times,
         )
 
@@ -447,20 +455,6 @@ class JmOption:
             if domain_list is not None:
                 return domain_list
             return [JmModuleConfig.get_html_domain()]
-
-        ExceptionTool.raises(f'没有配置域名，且是无法识别的client类型: {client_key}')
-
-    def decide_postman_headers(self, client_key, domain):
-        is_client_type = lambda ctype: self.client_key_is_given_type(client_key, ctype)
-
-        if is_client_type(JmApiClient):
-            # 移动端
-            # 不配置headers，由client每次请求前创建headers
-            return None
-
-        if is_client_type(JmHtmlClient):
-            # 网页端
-            return JmModuleConfig.new_html_headers(domain)
 
         ExceptionTool.raises(f'没有配置域名，且是无法识别的client类型: {client_key}')
 
@@ -502,7 +496,7 @@ class JmOption:
 
     # 下面的方法为调用插件提供支持
 
-    def call_all_plugin(self, group: str, **extra):
+    def call_all_plugin(self, group: str, safe=True, **extra):
         plugin_list: List[dict] = self.plugins.get(group, [])
         if plugin_list is None or len(plugin_list) == 0:
             return
@@ -512,14 +506,20 @@ class JmOption:
 
         plugin_registry = JmModuleConfig.REGISTRY_PLUGIN
         for pinfo in plugin_list:
-            key, kwargs = pinfo['plugin'], pinfo['kwargs']
+            key, kwargs = pinfo['plugin'], pinfo.get('kwargs', None)  # kwargs为None
             plugin_class: Optional[Type[JmOptionPlugin]] = plugin_registry.get(key, None)
 
             ExceptionTool.require_true(plugin_class is not None, f'[{group}] 未注册的plugin: {key}')
 
-            self.invoke_plugin(plugin_class, kwargs, extra, pinfo)
+            try:
+                self.invoke_plugin(plugin_class, kwargs, extra, pinfo)
+            except BaseException as e:
+                if safe is True:
+                    traceback_print_exec()
+                else:
+                    raise e
 
-    def invoke_plugin(self, plugin_class, kwargs: Any, extra: dict, pinfo: dict):
+    def invoke_plugin(self, plugin_class, kwargs: Optional[Dict], extra: dict, pinfo: dict):
         # 检查插件的参数类型
         kwargs = self.fix_kwargs(kwargs)
         # 把插件的配置数据kwargs和附加数据extra合并，extra会覆盖kwargs
@@ -536,6 +536,10 @@ class JmOption:
             # 构建插件对象
             plugin: JmOptionPlugin = plugin_class.build(self)
 
+            # 设置日志开关
+            if pinfo.get('log', True) is not True:
+                plugin.log_enable = False
+
             jm_log('plugin.invoke', f'调用插件: [{plugin_class.plugin_key}]')
             # 调用插件功能
             plugin.invoke(**kwargs)
@@ -546,7 +550,7 @@ class JmOption:
 
         except JmcomicException as e:
             # 模块内部异常，通过不是插件抛出的，而是插件调用了例如Client，Client请求失败抛出的
-            self.handle_plugin_exception(e, pinfo, kwargs, plugin)
+            self.handle_plugin_jmcomic_exception(e, pinfo, kwargs, plugin)
 
         except BaseException as e:
             # 为插件兜底，捕获其他所有异常
@@ -579,25 +583,28 @@ class JmOption:
     # noinspection PyMethodMayBeStatic,PyUnusedLocal
     def handle_plugin_unexpected_error(self, e, pinfo: dict, kwargs: dict, plugin):
         msg = str(e)
-        jm_log('plugin.error', f'插件 [{plugin.plugin_key}]，运行遇到未捕获异常，异常信息: {msg}')
+        jm_log('plugin.error', f'插件 [{plugin.plugin_key}]，运行遇到未捕获异常，异常信息: [{msg}]')
         raise e
 
     # noinspection PyMethodMayBeStatic,PyUnusedLocal
-    def handle_plugin_exception(self, e, pinfo: dict, kwargs: dict, plugin):
+    def handle_plugin_jmcomic_exception(self, e, pinfo: dict, kwargs: dict, plugin):
         msg = str(e)
         jm_log('plugin.exception', f'插件 [{plugin.plugin_key}] 调用失败，异常信息: [{msg}]')
         raise e
 
     # noinspection PyMethodMayBeStatic
-    def fix_kwargs(self, kwargs) -> Dict[str, Any]:
+    def fix_kwargs(self, kwargs: Optional[Dict]) -> Dict[str, Any]:
         """
         kwargs将来要传给方法参数，这要求kwargs的key是str类型，
         该方法检查kwargs的key的类型，如果不是str，尝试转为str，不行则抛异常。
         """
-        ExceptionTool.require_true(
-            isinstance(kwargs, dict),
-            f'插件的kwargs参数必须为dict类型，而不能是类型: {type(kwargs)}'
-        )
+        if kwargs is None:
+            kwargs = {}
+        else:
+            ExceptionTool.require_true(
+                isinstance(kwargs, dict),
+                f'插件的kwargs参数必须为dict类型，而不能是类型: {type(kwargs)}'
+            )
 
         kwargs: dict
         new_kwargs: Dict[str, Any] = {}

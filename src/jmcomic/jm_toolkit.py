@@ -51,9 +51,12 @@ class JmcomicText:
     # 點擊喜歡
     pattern_html_album_likes = compile(r'<span id="albim_likes_\d+">(.*?)</span>')
     # 觀看
-    pattern_html_album_views = compile(r'<span>(.*?)</span> (次觀看|观看次数)')
+    pattern_html_album_views = compile(r'<span>(.*?)</span>\n<span>(次觀看|观看次数)</span>')
     # 評論(div)
     pattern_html_album_comment_count = compile(r'<div class="badge"[^>]*?id="total_video_comments">(\d+)</div>'), 0
+
+    # 提取接口返回值信息
+    pattern_ajax_favorite_msg = compile(r'</button>(.*?)</div>')
 
     @classmethod
     def parse_to_jm_domain(cls, text: str):
@@ -112,10 +115,6 @@ class JmcomicText:
             "pattern_html_album_",
             JmModuleConfig.album_class()
         )
-
-    @classmethod
-    def analyse_jm_search_html(cls, html: str) -> JmSearchPage:
-        return JmPageTool.parse_html_to_search_page(html)
 
     @classmethod
     def reflect_new_instance(cls, html: str, cls_field_prefix: str, clazz: type):
@@ -187,6 +186,13 @@ class JmcomicText:
 
         return f'{JmModuleConfig.PROT}{domain}{path}'
 
+    @classmethod
+    def format_album_url(cls, aid, domain='18comic.vip'):
+        """
+        把album_id变为可访问的URL，方便print打印后用浏览器访问
+        """
+        return cls.format_url(f'/album/{aid}/', domain)
+
     class DSLReplacer:
 
         def __init__(self):
@@ -218,6 +224,91 @@ class JmcomicText:
     def parse_dsl_text(cls, dsl_text: str) -> str:
         return cls.dsl_replacer.parse_dsl_text(dsl_text)
 
+    bracket_map = {'(': ')',
+                   '[': ']',
+                   '【': '】',
+                   '（': '）',
+                   }
+
+    @classmethod
+    def parse_orig_album_name(cls, name: str, default=None):
+        word_list = cls.tokenize(name)
+
+        for word in word_list:
+            if word[0] in cls.bracket_map:
+                continue
+
+            return word
+
+        return default
+
+    @classmethod
+    def tokenize(cls, title: str) -> List[str]:
+        """
+        繞道#2 [暴碧漢化組] [えーすけ（123）] よりみち#2 (COMIC 快樂天 2024年1月號) [中國翻譯] [DL版]
+        :return: ['繞道#2', '[暴碧漢化組]', '[えーすけ（123）]', 'よりみち#2', '(COMIC 快樂天 2024年1月號)', '[中國翻譯]', '[DL版]']
+        """
+        title = title.strip()
+        ret = []
+        bracket_map = cls.bracket_map
+
+        char_list = []
+        i = 0
+        length = len(title)
+
+        def add(w=None):
+            if w is None:
+                w = ''.join(char_list).strip()
+
+            if w == '':
+                return
+
+            ret.append(w)
+            char_list.clear()
+
+        def find_right_pair(left_pair, i):
+            stack = [left_pair]
+            j = i + 1
+
+            while j < length and len(stack) != 0:
+                c = title[j]
+                if c in bracket_map:
+                    stack.append(c)
+                elif c == bracket_map[stack[-1]]:
+                    stack.pop()
+
+                j += 1
+
+            if len(stack) == 0:
+                return j
+            else:
+                return -1
+
+        while i < length:
+            c = title[i]
+
+            if c in bracket_map:
+                # 上一个单词结束
+                add()
+                # 定位右括号
+                j = find_right_pair(c, i)
+                ExceptionTool.require_true(j != -1, f'未闭合的 {c}{bracket_map[c]}: {title[i:]}')
+                # 整个括号的单词结束
+                add(title[i:j])
+                # 移动指针
+                i = j
+            else:
+                char_list.append(c)
+                i += 1
+
+        add()
+        return ret
+
+    @classmethod
+    def to_zh_cn(cls, s):
+        import zhconv
+        return zhconv.convert(s, 'zh_cn')
+
 
 # 支持dsl: #{???} -> os.getenv(???)
 JmcomicText.dsl_replacer.add_dsl_and_replacer(r'\$\{(.*?)\}', JmcomicText.match_os_env)
@@ -234,7 +325,7 @@ class PatternTool:
     def require_match(cls, html: str, pattern: Pattern, msg, rindex=1):
         match = pattern.search(html)
         if match is not None:
-            return match[rindex]
+            return match[rindex] if rindex is not None else match
 
         ExceptionTool.raises_regex(
             msg,
@@ -270,8 +361,17 @@ class JmPageTool:
         r'(<a[\s\S]*?) </div>'
     )
 
+    # 用来提取分类页面的的album的信息
+    pattern_html_category_album_info_list = compile(
+        r'<a href="/album/(\d+)/[^>]*>[\s\S]*?title="(.*?)"[^>]*>'
+        r'\n</a>\n'
+        r'<div class="label-loveicon">'
+        r'([\s\S]*?)'
+        r'<div class="clearfix">'
+    )
+
     # 用来查找tag列表
-    pattern_html_search_tag_list = compile(r'<a href=".*?">(.*?)</a>')
+    pattern_html_search_tags = compile(r'<a[^>]*?>(.*?)</a>')
 
     # 查找错误，例如 [错误，關鍵字過短，請至少輸入兩個字以上。]
     pattern_html_search_error = compile(r'<fieldset>\n<legend>(.*?)</legend>\n<div class=.*?>\n(.*?)\n</div>\n</fieldset>')
@@ -318,11 +418,29 @@ class JmPageTool:
         album_info_list = cls.pattern_html_search_album_info_list.findall(html)
 
         for (album_id, title, _, label_category, label_sub, tag_text) in album_info_list:
-            tag_list = cls.pattern_html_search_tag_list.findall(tag_text)
+            tags = cls.pattern_html_search_tags.findall(tag_text)
             content.append((
                 album_id, {
                     'name': title,  # 改成name是为了兼容 parse_api_resp_to_page
-                    'tag_list': tag_list
+                    'tags': tags
+                }
+            ))
+
+        return JmSearchPage(content, total)
+
+    @classmethod
+    def parse_html_to_category_page(cls, html: str) -> JmSearchPage:
+        content = []
+        total = int(PatternTool.match_or_default(html, *cls.pattern_html_search_total))
+
+        album_info_list = cls.pattern_html_category_album_info_list.findall(html)
+
+        for (album_id, title, tag_text) in album_info_list:
+            tags = cls.pattern_html_search_tags.findall(tag_text)
+            content.append((
+                album_id, {
+                    'name': title,  # 改成name是为了兼容 parse_api_resp_to_page
+                    'tags': tags
                 }
             ))
 
@@ -376,7 +494,7 @@ class JmPageTool:
           ]
         }
         """
-        total: int = int(data.total)
+        total: int = int(data.total or 0)  # 2024.1.5 data.total可能为None
         content = cls.adapt_content(data.content)
         return JmSearchPage(content, total)
 
@@ -428,7 +546,7 @@ class JmPageTool:
     def adapt_content(cls, content):
         def adapt_item(item: DictModel):
             item: dict = item.src_dict
-            item.setdefault('tag_list', [])
+            item.setdefault('tags', [])
             return item
 
         content = [
@@ -791,8 +909,8 @@ class JmCryptoTool:
     @classmethod
     def token_and_tokenparam(cls,
                              ts,
-                             ver=JmMagicConstants.APP_VERSION,
-                             secret=JmMagicConstants.APP_TOKEN_SECRET,
+                             ver=None,
+                             secret=None,
                              ):
         """
         计算禁漫接口的请求headers的token和tokenparam
@@ -802,6 +920,12 @@ class JmCryptoTool:
         :param secret: 密钥
         :return (token, tokenparam)
         """
+
+        if ver is None:
+            ver = JmMagicConstants.APP_VERSION
+
+        if secret is None:
+            secret = JmMagicConstants.APP_TOKEN_SECRET
 
         # tokenparam: 1700566805,1.6.3
         tokenparam = '{},{}'.format(ts, ver)
@@ -815,7 +939,7 @@ class JmCryptoTool:
     def decode_resp_data(cls,
                          data: str,
                          ts,
-                         secret=JmMagicConstants.APP_DATA_SECRET,
+                         secret=None,
                          ) -> str:
         """
         解密接口返回值
@@ -825,6 +949,9 @@ class JmCryptoTool:
         :param secret: 密钥
         :return: json格式的字符串
         """
+        if secret is None:
+            secret = JmMagicConstants.APP_DATA_SECRET
+
         # 1. base64解码
         import base64
         data_b64 = base64.b64decode(data)

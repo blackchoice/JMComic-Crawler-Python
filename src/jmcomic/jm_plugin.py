@@ -17,6 +17,8 @@ class JmOptionPlugin:
 
     def __init__(self, option: JmOption):
         self.option = option
+        self.log_enable = True
+        self.delete_original_file = False
 
     def invoke(self, **kwargs) -> None:
         """
@@ -33,16 +35,21 @@ class JmOptionPlugin:
         """
         return cls(option)
 
-    @classmethod
-    def log(cls, msg, topic=None):
+    def log(self, msg, topic=None):
+        if self.log_enable is not True:
+            return
+
         jm_log(
-            topic=f'plugin.{cls.plugin_key}' + (f'.{topic}' if topic is not None else ''),
+            topic=f'plugin.{self.plugin_key}' + (f'.{topic}' if topic is not None else ''),
             msg=msg
         )
 
-    def require_true(self, case: Any, msg: str):
+    def require_param(self, case: Any, msg: str):
         """
-        独立于ExceptionTool的一套异常抛出体系
+        专门用于校验参数的方法，会抛出特定异常，由option拦截根据策略进行处理
+
+        :param case: 条件
+        :param msg: 报错信息
         """
         if case:
             return
@@ -55,6 +62,38 @@ class JmOptionPlugin:
         import warnings
         warnings.warn(msg)
 
+    def execute_deletion(self, paths: List[str]):
+        """
+        删除文件和文件夹
+        :param paths: 路径列表
+        """
+        if self.delete_original_file is not True:
+            return
+
+        for p in paths:
+            if file_not_exists(p):
+                continue
+
+            if os.path.isdir(p):
+                os.rmdir(p)
+                self.log(f'删除文件夹: {p}', 'remove')
+            else:
+                os.remove(p)
+                self.log(f'删除原文件: {p}', 'remove')
+
+    # noinspection PyMethodMayBeStatic
+    def execute_cmd(self, cmd):
+        """
+        执行shell命令，这里采用简单的实现
+        :param cmd: shell命令
+        """
+        return os.system(cmd)
+
+    # noinspection PyMethodMayBeStatic
+    def execute_multi_line_cmd(self, cmd: str):
+        import subprocess
+        subprocess.run(cmd, shell=True, check=True)
+
 
 class JmLoginPlugin(JmOptionPlugin):
     """
@@ -65,11 +104,12 @@ class JmLoginPlugin(JmOptionPlugin):
     def invoke(self,
                username: str,
                password: str,
+               impl=None,
                ) -> None:
-        self.require_true(username, '用户名不能为空')
-        self.require_true(password, '密码不能为空')
+        self.require_param(username, '用户名不能为空')
+        self.require_param(password, '密码不能为空')
 
-        client = self.option.new_jm_client()
+        client = self.option.build_jm_client(impl=impl)
         client.login(username, password)
 
         cookies = dict(client['cookies'])
@@ -208,7 +248,7 @@ class FindUpdatePlugin(JmOptionPlugin):
             return photo_ls
 
         class FindUpdateDownloader(JmDownloader):
-            def filter_iter_objs(self, detail):
+            def do_filter(self, detail):
                 if not detail.is_album():
                     return detail
 
@@ -330,12 +370,16 @@ class ZipPlugin(JmOptionPlugin):
         return self.unified_path(source_dir)
 
     def after_zip(self, dir_zip_dict: Dict[str, Optional[str]]):
-        # 是否要删除所有原文件
-        if self.delete_original_file is True:
-            self.delete_all_files_and_empty_dir(
-                all_downloaded=self.downloader.all_downloaded,
-                dir_list=list(dir_zip_dict.keys())
-            )
+        # 删除所有原文件
+        dirs = sorted(dir_zip_dict.keys(), reverse=True)
+        image_paths = [
+            path
+            for photo_dict in self.downloader.all_downloaded.values()
+            for image_list in photo_dict.values()
+            for path, image in image_list
+        ]
+        self.execute_deletion(image_paths)
+        self.execute_deletion(dirs)
 
     # noinspection PyMethodMayBeStatic
     def get_zip_path(self, album, photo, filename_rule, suffix, zip_dir):
@@ -348,28 +392,6 @@ class ZipPlugin(JmOptionPlugin):
             zip_dir,
             filename + fix_suffix(suffix),
         )
-
-    # noinspection PyMethodMayBeStatic
-    def delete_all_files_and_empty_dir(self, all_downloaded: dict, dir_list: List[str]):
-        """
-        删除所有文件和文件夹
-        """
-        import os
-        for photo_dict in all_downloaded.values():
-            for image_list in photo_dict.values():
-                for f, _ in image_list:
-                    # check not exist
-                    if file_not_exists(f):
-                        continue
-
-                    os.remove(f)
-                    self.log(f'删除原文件: {f}', 'remove')
-
-        for d in sorted(dir_list, reverse=True):
-            # check exist
-            if file_exists(d):
-                os.rmdir(d)
-                self.log(f'删除文件夹: {d}', 'remove')
 
 
 class ClientProxyPlugin(JmOptionPlugin):
@@ -437,7 +459,7 @@ class SendQQEmailPlugin(JmOptionPlugin):
                album=None,
                downloader=None,
                ) -> None:
-        self.require_true(msg_from and msg_to and password, '发件人、收件人、授权码都不能为空')
+        self.require_param(msg_from and msg_to and password, '发件人、收件人、授权码都不能为空')
 
         from common import EmailConfig
         econfig = EmailConfig(msg_from, msg_to, password)
@@ -515,3 +537,215 @@ class AutoSetBrowserCookiesPlugin(JmOptionPlugin):
             {k: v for k, v in cookies.items() if k in self.accepted_cookies_keys}
         )
         self.log('获取浏览器cookies成功')
+
+
+# noinspection PyMethodMayBeStatic
+class FavoriteFolderExportPlugin(JmOptionPlugin):
+    plugin_key = 'favorite_folder_export'
+
+    # noinspection PyAttributeOutsideInit
+    def invoke(self,
+               save_dir=None,
+               zip_enable=False,
+               zip_filepath=None,
+               zip_password=None,
+               delete_original_file=False,
+               ):
+        self.save_dir = os.path.abspath(save_dir if save_dir is not None else (os.getcwd() + '/export/'))
+        self.zip_enable = zip_enable
+        self.zip_filepath = os.path.abspath(zip_filepath)
+        self.zip_password = zip_password
+        self.delete_original_file = delete_original_file
+        self.files = []
+
+        mkdir_if_not_exists(self.save_dir)
+        mkdir_if_not_exists(of_dir_path(self.zip_filepath))
+
+        self.main()
+
+    def main(self):
+        cl = self.option.build_jm_client()
+        # noinspection PyAttributeOutsideInit
+        self.cl = cl
+        page = cl.favorite_folder()
+
+        # 获取所有的收藏夹
+        folders = {fid: fname for fid, fname in page.iter_folder_id_name()}
+        # 加上特殊收藏栏【全部】
+        folders.setdefault('0', '全部')
+
+        # 一个收藏夹一个线程，导出收藏夹数据到文件
+        multi_thread_launcher(
+            iter_objs=folders.items(),
+            apply_each_obj_func=self.handle_folder,
+        )
+
+        if not self.zip_enable:
+            return
+
+        # 压缩导出的文件
+        self.require_param(self.zip_filepath, '如果开启zip，请指定zip_filepath参数（压缩文件保存路径）')
+
+        if self.zip_password is None:
+            self.zip_folder_without_password(self.files, self.zip_filepath)
+        else:
+            self.zip_with_password()
+
+        self.execute_deletion(self.files)
+
+    def handle_folder(self, fid: str, fname: str):
+        self.log(f'【收藏夹: {fname}, fid: {fid}】开始获取数据')
+
+        # 获取收藏夹数据
+        page_data = self.fetch_folder_page_data(fid)
+
+        # 序列化到文件
+        filepath = self.save_folder_page_data_to_file(page_data, fid, fname)
+
+        if filepath is None:
+            self.log(f'【收藏夹: {fname}, fid: {fid}】收藏夹无数据')
+            return
+
+        self.log(f'【收藏夹: {fname}, fid: {fid}】保存文件成功 → [{filepath}]')
+        self.files.append(filepath)
+
+    def fetch_folder_page_data(self, fid):
+        # 一页一页获取，不使用并行
+        page_data = list(self.cl.favorite_folder_gen(folder_id=fid))
+        return page_data
+
+    def save_folder_page_data_to_file(self, page_data: List[JmFavoritePage], fid: str, fname: str):
+        from os import path
+        filepath = path.abspath(path.join(self.save_dir, fix_windir_name(f'【{fid}】{fname}.csv')))
+
+        data = []
+        for page in page_data:
+            for aid, extra in page.content:
+                data.append(
+                    (aid, extra.get('author', '') or JmMagicConstants.DEFAULT_AUTHOR, extra['name'])
+                )
+
+        if len(data) == 0:
+            return
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write('id,author,name\n')
+            for item in data:
+                f.write(','.join(item) + '\n')
+
+        return filepath
+
+    def zip_folder_without_password(self, files, zip_path):
+        """
+        压缩文件夹中的文件并设置密码
+
+        :param files: 要压缩的文件的绝对路径的列表
+        :param zip_path: 压缩文件的保存路径
+        """
+        import zipfile
+
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            # 获取文件夹中的文件列表并将其添加到 ZIP 文件中
+            for file in files:
+                zipf.write(file, arcname=of_file_name(file))
+
+    def zip_with_password(self):
+        # 构造shell命令
+        cmd_list = f'''
+        cd {self.save_dir}
+        7z a "{self.zip_filepath}" "./" -p{self.zip_password} -mhe=on > "../7z_output.txt"
+        
+        '''
+        self.log(f'运行命令: {cmd_list}')
+
+        # 执行
+        self.execute_multi_line_cmd(cmd_list)
+
+
+class ConvertJpgToPdfPlugin(JmOptionPlugin):
+    plugin_key = 'j2p'
+
+    def check_image_suffix_is_valid(self, std_suffix):
+        """
+        检查option配置的图片后缀转换，目前限制使用Magick时只能搭配jpg
+        暂不探究Magick是否支持更多图片格式
+        """
+        cur_suffix: Optional[str] = self.option.download.image.suffix
+
+        ExceptionTool.require_true(
+            cur_suffix is not None and cur_suffix.endswith(std_suffix),
+            '请把图片的后缀转换配置为jpg，不然无法使用Magick！'
+            f'（当前配置是[{cur_suffix}]）\n'
+            f'配置模板如下: \n'
+            f'```\n'
+            f'download:\n'
+            f'  image:\n'
+            f'    suffix: {std_suffix} # 当前配置是{cur_suffix}\n'
+            f'```'
+        )
+
+    def invoke(self,
+               photo: JmPhotoDetail,
+               downloader=None,
+               pdf_dir=None,
+               filename_rule='Pid',
+               quality=100,
+               delete_original_file=False,
+               overwrite_cmd=None,
+               overwrite_jpg=None,
+               **kwargs,
+               ):
+        self.delete_original_file = delete_original_file
+
+        # 检查图片后缀配置
+        suffix = overwrite_jpg or '.jpg'
+        self.check_image_suffix_is_valid(suffix)
+
+        # 处理文件夹配置
+        filename = DirRule.apply_rule_directly(None, photo, filename_rule)
+        photo_dir = self.option.decide_image_save_dir(photo)
+
+        # 处理生成的pdf文件的路径
+        if pdf_dir is None:
+            pdf_dir = photo_dir
+        else:
+            pdf_dir = fix_filepath(pdf_dir, True)
+            mkdir_if_not_exists(pdf_dir)
+
+        pdf_filepath = os.path.join(pdf_dir, f'{filename}.pdf')
+
+        # 生成命令
+        def generate_cmd():
+            return (
+                    overwrite_cmd or
+                    'magick convert -quality {quality} "{photo_dir}*{suffix}" "{pdf_filepath}"'
+            ).format(
+                quality=quality,
+                photo_dir=photo_dir,
+                suffix=suffix,
+                pdf_filepath=pdf_filepath,
+            )
+
+        cmd = generate_cmd()
+        self.log(f'Execute Command: [{cmd}]')
+        code = self.execute_cmd(cmd)
+
+        ExceptionTool.require_true(
+            code == 0,
+            'jpg图片合并为pdf失败！'
+            '请确认你是否安装了magick，安装网站: [http://www.imagemagick.org/]',
+        )
+
+        self.log(f'Convert Successfully: JM{photo.id} → {pdf_filepath}')
+
+        if downloader is not None:
+            from .jm_downloader import JmDownloader
+            downloader: JmDownloader
+
+            paths = [
+                path
+                for path, image in downloader.all_downloaded[photo.from_album][photo]
+            ]
+
+            paths.append(self.option.decide_image_save_dir(photo, ensure_exists=False))
+            self.execute_deletion(paths)

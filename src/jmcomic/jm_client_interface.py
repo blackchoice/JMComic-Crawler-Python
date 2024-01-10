@@ -71,7 +71,7 @@ class JmImageResp(JmResp):
             JmImageTool.save_resp_img(
                 self,
                 path,
-                need_convert=suffix_not_equal(img_url, path),
+                need_convert=suffix_not_equal(img_url[:img_url.find("?")], path),
             )
         else:
             # 解密图片并保存文件
@@ -84,6 +84,7 @@ class JmImageResp(JmResp):
 
 class JmJsonResp(JmResp):
 
+    @field_cache()
     def json(self) -> Dict:
         return self.resp.json()
 
@@ -128,9 +129,6 @@ class JmAlbumCommentResp(JmJsonResp):
     def is_success(self) -> bool:
         return super().is_success and self.json()['err'] is False
 
-    def json(self) -> Dict:
-        return self.resp.json()
-
 
 """
 
@@ -149,15 +147,6 @@ class JmDetailClient:
                          fetch_album=True,
                          fetch_scramble_id=True,
                          ) -> JmPhotoDetail:
-        raise NotImplementedError
-
-    def of_api_url(self, api_path, domain):
-        raise NotImplementedError
-
-    def set_cache_dict(self, cache_dict: Optional[Dict]):
-        raise NotImplementedError
-
-    def get_cache_dict(self) -> Optional[Dict]:
         raise NotImplementedError
 
     def check_photo(self, photo: JmPhotoDetail):
@@ -226,6 +215,15 @@ class JmUserClient:
         :param page: 分页
         :param order_by: 排序
         :param username: 用户名
+        """
+        raise NotImplementedError
+
+    def add_favorite_album(self,
+                           album_id,
+                           folder_id='0',
+                           ):
+        """
+        把漫画加入收藏夹
         """
         raise NotImplementedError
 
@@ -372,12 +370,78 @@ class JmSearchAlbumClient:
         return self.search(search_query, page, 4, order_by, time)
 
 
+class JmCategoryClient:
+    """
+    该接口可以看作是对全体禁漫本子的排行，热门排行的功能也派生于此
+
+    月排行 = 分类【时间=月，排序=观看】
+    周排行 = 分类【时间=周，排序=观看】
+    日排行 = 分类【时间=周，排序=观看】
+    """
+
+    def categories_filter(self,
+                          page: int,
+                          time: str,
+                          category: str,
+                          order_by: str,
+                          ) -> JmCategoryPage:
+        """
+        分类
+
+        :param page: 页码
+        :param time: 时间范围，默认是全部时间
+        :param category: 类别，默认是最新，即显示最新的禁漫本子
+        :param order_by: 排序方式，默认是观看数
+        """
+        raise NotImplementedError
+
+    def month_ranking(self,
+                      page: int,
+                      category: str = JmMagicConstants.CATEGORY_ALL,
+                      ):
+        """
+        月排行 = 分类【时间=月，排序=观看】
+        """
+        return self.categories_filter(page,
+                                      JmMagicConstants.TIME_MONTH,
+                                      category,
+                                      JmMagicConstants.ORDER_BY_VIEW,
+                                      )
+
+    def week_ranking(self,
+                     page: int,
+                     category: str = JmMagicConstants.CATEGORY_ALL,
+                     ):
+        """
+        周排行 = 分类【时间=周，排序=观看】
+        """
+        return self.categories_filter(page,
+                                      JmMagicConstants.TIME_WEEK,
+                                      category,
+                                      JmMagicConstants.ORDER_BY_VIEW,
+                                      )
+
+    def day_ranking(self,
+                    page: int,
+                    category: str = JmMagicConstants.CATEGORY_ALL,
+                    ):
+        """
+        日排行 = 分类【时间=日，排序=观看】
+        """
+        return self.categories_filter(page,
+                                      JmMagicConstants.TIME_TODAY,
+                                      category,
+                                      JmMagicConstants.ORDER_BY_VIEW,
+                                      )
+
+
 # noinspection PyAbstractClass
 class JmcomicClient(
     JmImageClient,
     JmDetailClient,
     JmUserClient,
     JmSearchAlbumClient,
+    JmCategoryClient,
     Postman,
 ):
     client_key: None
@@ -394,6 +458,15 @@ class JmcomicClient(
         """
         raise NotImplementedError
 
+    def set_cache_dict(self, cache_dict: Optional[Dict]):
+        raise NotImplementedError
+
+    def get_cache_dict(self) -> Optional[Dict]:
+        raise NotImplementedError
+
+    def of_api_url(self, api_path, domain):
+        raise NotImplementedError
+
     def get_html_domain(self, postman=None):
         return JmModuleConfig.get_html_domain(postman or self.get_root_postman())
 
@@ -403,7 +476,8 @@ class JmcomicClient(
     # noinspection PyMethodMayBeStatic
     def do_page_iter(self, params: dict, page: int, get_page_method):
         from math import inf
-        def update(value: Union[Dict], page: int, page_content: JmPageContent):
+
+        def update(value: Optional[Dict], page: int, page_content: JmPageContent):
             if value is None:
                 return page + 1, page_content.page_count
 
@@ -478,3 +552,20 @@ class JmcomicClient(
         }
 
         yield from self.do_page_iter(params, page, self.search)
+
+    def categories_filter_gen(self,
+                              page: int = 1,
+                              time: str = JmMagicConstants.TIME_ALL,
+                              category: str = JmMagicConstants.CATEGORY_ALL,
+                              order_by: str = JmMagicConstants.ORDER_BY_LATEST,
+                              ) -> Generator[JmCategoryPage, Dict, None]:
+        """
+        见 search_gen
+        """
+        params = {
+            'time': time,
+            'category': category,
+            'order_by': order_by,
+        }
+
+        yield from self.do_page_iter(params, page, self.categories_filter)
