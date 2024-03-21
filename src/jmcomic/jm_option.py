@@ -105,13 +105,11 @@ class DirRule:
         解析下载路径dsl，得到一个路径规则解析列表
         """
 
-        if '_' not in rule_dsl and rule_dsl != 'Bd':
-            ExceptionTool.raises(f'不支持的dsl: "{rule_dsl}"')
-
-        rule_list = rule_dsl.split('_')
+        rule_list = self.split_rule_dsl(rule_dsl)
         solver_ls: List[DirRule.RuleSolver] = []
 
         for rule in rule_list:
+            rule = rule.strip()
             if rule == 'Bd':
                 solver_ls.append((0, lambda _: base_dir, 'Bd'))
                 continue
@@ -123,6 +121,19 @@ class DirRule:
             solver_ls.append(rule_solver)
 
         return solver_ls
+
+    # noinspection PyMethodMayBeStatic
+    def split_rule_dsl(self, rule_dsl: str) -> List[str]:
+        if rule_dsl == 'Bd':
+            return [rule_dsl]
+
+        if '/' in rule_dsl:
+            return rule_dsl.split('/')
+
+        if '_' in rule_dsl:
+            return rule_dsl.split('_')
+
+        ExceptionTool.raises(f'不支持的rule配置: "{rule_dsl}"')
 
     @classmethod
     def get_rule_solver(cls, rule: str) -> Optional[RuleSolver]:
@@ -181,22 +192,37 @@ class JmOption:
                  client: Dict,
                  plugins: Dict,
                  filepath=None,
+                 call_after_init_plugin=True,
                  ):
         # 路径规则配置
         self.dir_rule = DirRule(**dir_rule)
         # 客户端配置
-        self.client = AdvancedEasyAccessDict(client)
+        self.client = AdvancedDict(client)
         # 下载配置
-        self.download = AdvancedEasyAccessDict(download)
+        self.download = AdvancedDict(download)
         # 插件配置
-        self.plugins = AdvancedEasyAccessDict(plugins)
+        self.plugins = AdvancedDict(plugins)
         # 其他配置
         self.filepath = filepath
 
         # 需要主线程等待完成的插件
         self.need_wait_plugins = []
 
-        self.call_all_plugin('after_init', safe=True)
+        if call_after_init_plugin:
+            self.call_all_plugin('after_init', safe=True)
+
+    def copy_option(self):
+        return self.__class__(
+            dir_rule={
+                'rule': self.dir_rule.rule_dsl,
+                'base_dir': self.dir_rule.base_dir,
+            },
+            download=self.download.src_dict,
+            client=self.client.src_dict,
+            plugins=self.plugins.src_dict,
+            filepath=self.filepath,
+            call_after_init_plugin=False
+        )
 
     """
     下面是decide系列方法，为了支持重写和增加程序动态性。
@@ -350,6 +376,7 @@ class JmOption:
     @classmethod
     def from_file(cls, filepath: str) -> 'JmOption':
         dic: dict = PackerUtil.unpack(filepath)[0]
+        dic.setdefault('filepath', filepath)
         return cls.construct(dic)
 
     def to_file(self, filepath=None):
