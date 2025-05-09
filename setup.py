@@ -27,8 +27,8 @@ setup(
     package_dir={"": "src"},
     python_requires=">=3.7",
     install_requires=[
-        'commonX>=0.6.4',
         'curl_cffi',
+        'commonX',
         'PyYAML',
         'Pillow',
         'pycryptodome',
@@ -43,6 +43,7 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Operating System :: MacOS",
         "Operating System :: POSIX :: Linux",
         "Operating System :: Microsoft :: Windows",

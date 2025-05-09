@@ -69,7 +69,38 @@ class Test_Api(JmTestConfigurable):
         if len(exception_list) == 0:
             return
 
+        if self.client.is_given_type(JmApiClient):
+            return
+
         for e in exception_list:
             print(e)
 
         raise AssertionError(exception_list)
+
+    def test_partial_exception(self):
+        class TestDownloader(JmDownloader):
+            def do_filter(self, detail: DetailEntity):
+                if detail.is_photo():
+                    return detail[0:2]
+                if detail.is_album():
+                    return detail[0:2]
+                return super().do_filter(detail)
+
+            @catch_exception
+            def download_by_image_detail(self, image: JmImageDetail):
+                raise Exception('test_partial_exception')
+
+            @catch_exception
+            def download_by_photo_detail(self, photo: JmPhotoDetail):
+                if photo.index != 2:
+                    raise Exception('test_partial_exception')
+                return super().download_by_photo_detail(photo)
+
+        self.assertRaises(
+            PartialDownloadFailedException,
+            lambda: download_album(182150, downloader=TestDownloader, check_exception=True)
+        )
+        self.assertRaises(
+            PartialDownloadFailedException,
+            lambda: download_photo(182151, downloader=TestDownloader, check_exception=True)
+        )

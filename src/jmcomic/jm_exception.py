@@ -15,6 +15,7 @@ class JmcomicException(Exception):
     def __str__(self):
         return self.msg
 
+
 class ResponseUnexpectedException(JmcomicException):
     description = '响应不符合预期异常'
 
@@ -44,7 +45,6 @@ class RegularNotMatchException(JmcomicException):
 
 class JsonResolveFailException(ResponseUnexpectedException):
     description = 'Json解析异常'
-    pass
 
 
 class MissingAlbumPhotoException(ResponseUnexpectedException):
@@ -57,8 +57,14 @@ class MissingAlbumPhotoException(ResponseUnexpectedException):
 
 class RequestRetryAllFailException(JmcomicException):
     description = '请求重试全部失败异常'
-    pass
 
+
+class PartialDownloadFailedException(JmcomicException):
+    description = '部分章节或图片下载失败异常'
+
+    @property
+    def downloader(self):
+        return self.from_context(ExceptionTool.CONTEXT_KEY_DOWNLOADER)
 
 class ExceptionTool:
     """
@@ -71,13 +77,7 @@ class ExceptionTool:
     CONTEXT_KEY_HTML = 'html'
     CONTEXT_KEY_RE_PATTERN = 'pattern'
     CONTEXT_KEY_MISSING_JM_ID = 'missing_jm_id'
-
-    # 兼容旧版本
-
-    EXTRA_KEY_RESP = 'resp'
-    EXTRA_KEY_HTML = 'html'
-    EXTRA_KEY_RE_PATTERN = 'pattern'
-    EXTRA_KEY_MISSING_JM_ID = 'missing_jm_id'
+    CONTEXT_KEY_DOWNLOADER = 'downloader'
 
     @classmethod
     def raises(cls,
@@ -144,7 +144,8 @@ class ExceptionTool:
         :param resp: 响应对象
         :param jmid: 禁漫本子/章节id
         """
-        url = resp.url
+        from .jm_toolkit import JmcomicText
+        url = JmcomicText.format_album_url(jmid)
 
         req_type = "本子" if "album" in url else "章节"
         cls.raises(

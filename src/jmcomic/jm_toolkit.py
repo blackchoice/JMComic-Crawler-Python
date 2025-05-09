@@ -6,7 +6,7 @@ from .jm_exception import *
 class JmcomicText:
     pattern_jm_domain = compile(r'https://([\w.-]+)')
     pattern_jm_pa_id = [
-        (compile(r'(photos?|album)/(\d+)'), 2),
+        (compile(r'(photos?|albums?)/(\d+)'), 2),
         (compile(r'id=(\d+)'), 1),
     ]
     pattern_html_jm_pub_domain = compile(r'[\w-]+\.\w+/?\w+')
@@ -24,37 +24,36 @@ class JmcomicText:
 
     pattern_html_album_album_id = compile(r'<span class="number">.*?：JM(\d+)</span>')
     pattern_html_album_scramble_id = compile(r'var scramble_id = (\d+);')
-    pattern_html_album_name = compile(r'<h1 class="book-name" id="book-name">([\s\S]*?)</h1>')
-    pattern_html_album_episode_list = compile(r'data-album="(\d+)">\n *?<li.*?>\n *'
-                                              r'第(\d+)話\n([\s\S]*?)\n *'
-                                              r'<[\s\S]*?>(\d+-\d+-\d+).*?')
+    pattern_html_album_name = compile(r'<h2 class="book-name" id="book-name"[^>]*?>([\s\S]*?)</h2>')
+    pattern_html_album_episode_list = compile(r'data-album="(\d+)"[^>]*>\s*?<li.*?>\s*?第(\d+)[话話]([\s\S]*?)<[\s\S]*?>')
     pattern_html_album_page_count = compile(r'<span class="pagecount">.*?:(\d+)</span>')
     pattern_html_album_pub_date = compile(r'>上架日期 : (.*?)</span>')
     pattern_html_album_update_date = compile(r'>更新日期 : (.*?)</span>')
+    pattern_html_tag_a = compile(r'<a[^>]*?>\s*(\S*)\s*</a>')
     # 作品
     pattern_html_album_works = [
         compile(r'<span itemprop="author" data-type="works">([\s\S]*?)</span>'),
-        compile(r'<a[^>]*?>(.*?)</a>')
+        pattern_html_tag_a,
     ]
     # 登場人物
     pattern_html_album_actors = [
         compile(r'<span itemprop="author" data-type="actor">([\s\S]*?)</span>'),
-        compile(r'<a[^>]*?>(.*?)</a>')
+        pattern_html_tag_a,
     ]
     # 标签
     pattern_html_album_tags = [
         compile(r'<span itemprop="genre" data-type="tags">([\s\S]*?)</span>'),
-        compile(r'<a[^>]*?>(.*?)</a>')
+        pattern_html_tag_a,
     ]
     # 作者
     pattern_html_album_authors = [
         compile(r'作者： *<span itemprop="author" data-type="author">([\s\S]*?)</span>'),
-        compile(r"<a[^>]*?>(.*?)</a>"),
+        pattern_html_tag_a,
     ]
     # 點擊喜歡
     pattern_html_album_likes = compile(r'<span id="albim_likes_\d+">(.*?)</span>')
     # 觀看
-    pattern_html_album_views = compile(r'<span>(.*?)</span>\n *<span>(次觀看|观看次数)</span>')
+    pattern_html_album_views = compile(r'<span>(.*?)</span>\n *<span>(次觀看|观看次数|次观看次数)</span>')
     # 評論(div)
     pattern_html_album_comment_count = compile(r'<div class="badge"[^>]*?id="total_video_comments">(\d+)</div>'), 0
 
@@ -135,7 +134,7 @@ class JmcomicText:
                 last_pattern = pattern[len(pattern) - 1]
                 # 缩小文本
                 for i in range(0, len(pattern) - 1):
-                    match = pattern[i].search(text)
+                    match: Match = pattern[i].search(text)
                     if match is None:
                         return None
                     text = match[0]
@@ -299,7 +298,11 @@ class JmcomicText:
                 add()
                 # 定位右括号
                 j = find_right_pair(c, i)
-                ExceptionTool.require_true(j != -1, f'未闭合的 {c}{bracket_map[c]}: {title[i:]}')
+                if j == -1:
+                    # 括号未闭合
+                    char_list.append(c)
+                    i += 1
+                    continue
                 # 整个括号的单词结束
                 add(title[i:j])
                 # 移动指针
@@ -314,7 +317,21 @@ class JmcomicText:
     @classmethod
     def to_zh_cn(cls, s):
         import zhconv
-        return zhconv.convert(s, 'zh_cn')
+        return zhconv.convert(s, 'zh-cn')
+
+    @classmethod
+    def try_mkdir(cls, save_dir: str):
+        try:
+            mkdir_if_not_exists(save_dir)
+        except OSError as e:
+            if e.errno == 36:
+                # 目录名过长
+                limit = JmModuleConfig.VAR_FILE_NAME_LENGTH_LIMIT
+                jm_log('error', f'目录名过长，无法创建目录，强制缩短到{limit}个字符并重试')
+                save_dir = save_dir[0:limit]
+                return cls.try_mkdir(save_dir)
+            raise e
+        return save_dir
 
 
 # 支持dsl: #{???} -> os.getenv(???)
@@ -381,7 +398,7 @@ class JmPageTool:
     # 收藏页面的本子结果
     pattern_html_favorite_content = compile(
         r'<div id="favorites_album_[^>]*?>[\s\S]*?'
-        r'<a href="/album/(\d+)/">[\s\S]*?'
+        r'<a href="/album/(\d+)/[^"]*">[\s\S]*?'
         r'<div class="video-title title-truncate">([^<]*?)'
         r'</div>'
     )
@@ -676,7 +693,7 @@ class JmApiAdaptTool:
             chapter = AdvancedDict(chapter)
             # photo_id, photo_index, photo_title, photo_pub_date
             episode_list.append(
-                (chapter.id, chapter.sort, chapter.name, None)
+                (chapter.id, chapter.sort, chapter.name)
             )
         fields['episode_list'] = episode_list
         for it in 'scramble_id', 'page_count', 'pub_date', 'update_date':
@@ -707,7 +724,7 @@ class JmImageTool:
         如果需要改变图片的文件格式，比如 .jpg → .png，则需要指定参数 neet_convert=True.
         如果不需要改变图片的文件格式，使用 need_convert=False，可以跳过PIL解析图片，效率更高.
 
-        :param resp: HTTP响应对象
+        :param resp: JmImageResp
         :param filepath: 图片文件路径
         :param need_convert: 是否转换图片
         """
@@ -746,7 +763,7 @@ class JmImageTool:
 
         # 无需解密，直接保存
         if num == 0:
-            img_src.save(decoded_save_path)
+            cls.save_image(img_src, decoded_save_path)
             return
 
         import math
