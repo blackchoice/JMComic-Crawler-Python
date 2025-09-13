@@ -749,6 +749,7 @@ class Img2pdfPlugin(JmOptionPlugin):
                filename_rule='Pid',
                dir_rule=None,
                delete_original_file=False,
+               encrypt=None,
                **kwargs,
                ):
         if photo is None and album is None:
@@ -766,14 +767,14 @@ class Img2pdfPlugin(JmOptionPlugin):
         pdf_filepath = self.decide_filepath(album, photo, filename_rule, 'pdf', pdf_dir, dir_rule)
 
         # 调用 img2pdf 把 photo_dir 下的所有图片转为pdf
-        img_path_ls, img_dir_ls = self.write_img_2_pdf(pdf_filepath, album, photo)
+        img_path_ls, img_dir_ls = self.write_img_2_pdf(pdf_filepath, album, photo, encrypt)
         self.log(f'Convert Successfully: JM{album or photo} → {pdf_filepath}')
 
         # 执行删除
         img_path_ls += img_dir_ls
         self.execute_deletion(img_path_ls)
 
-    def write_img_2_pdf(self, pdf_filepath, album: JmAlbumDetail, photo: JmPhotoDetail):
+    def write_img_2_pdf(self, pdf_filepath, album: JmAlbumDetail, photo: JmPhotoDetail, encrypt):
         import img2pdf
 
         if album is None:
@@ -795,7 +796,21 @@ class Img2pdfPlugin(JmOptionPlugin):
         with open(pdf_filepath, 'wb') as f:
             f.write(img2pdf.convert(img_path_ls))
 
+        if encrypt:
+            self.encrypt_pdf(pdf_filepath, encrypt)
+
         return img_path_ls, img_dir_ls
+
+    def encrypt_pdf(self, pdf_filepath: str, encrypt: dict):
+        try:
+            import pikepdf
+        except ImportError:
+            self.warning_lib_not_install('pikepdf')
+            return
+
+        password = str(encrypt.get('password', ''))
+        with pikepdf.open(pdf_filepath, allow_overwriting_input=True) as pdf:
+            pdf.save(pdf_filepath, encryption=pikepdf.Encryption(user=password, owner=password))
 
 
 class LongImgPlugin(JmOptionPlugin):
@@ -1201,3 +1216,93 @@ class ReplacePathStringPlugin(JmOptionPlugin):
             return original_path
 
         self.option.decide_image_save_dir = new_decide_dir
+
+
+class AdvancedRetryPlugin(JmOptionPlugin):
+    plugin_key = 'advanced-retry'
+
+    def __init__(self, option: JmOption):
+        super().__init__(option)
+        self.retry_config = None
+
+    def invoke(self,
+               retry_config,
+               **kwargs):
+        self.require_param(isinstance(retry_config, dict), '必须配置retry_config为dict')
+        self.retry_config = retry_config
+
+        new_jm_client: Callable = self.option.new_jm_client
+
+        def hook_new_jm_client(*args, **kwargs):
+            client: JmcomicClient = new_jm_client(*args, **kwargs)
+            client.domain_retry_strategy = self.request_with_retry
+            client.domain_req_failed_counter = {}
+            from threading import Lock
+            client.domain_counter_lock = Lock()
+            return client
+
+        self.option.new_jm_client = hook_new_jm_client
+
+    def request_with_retry(self,
+                           client: AbstractJmClient,
+                           request: Callable,
+                           url: str,
+                           is_image: bool,
+                           **kwargs,
+                           ):
+        """
+        实现如下域名重试机制：
+        - 对域名列表轮询请求，配置：retry_rounds
+        - 限制单个域名最大失败次数，配置：retry_domain_max_times
+        - 轮询域名列表前，根据历史失败次数对域名列表排序，失败多的后置
+        """
+
+        def do_request(domain):
+            url_to_use = url
+            if url_to_use.startswith('/'):
+                # path → url
+                url_to_use = client.of_api_url(url, domain)
+                client.update_request_with_specify_domain(kwargs, domain, is_image)
+                jm_log(client.log_topic(), client.decode(url_to_use))
+            elif is_image:
+                # 图片url
+                client.update_request_with_specify_domain(kwargs, None, is_image)
+
+            resp = request(url_to_use, **kwargs)
+            resp = client.raise_if_resp_should_retry(resp, is_image)
+            return resp
+
+        retry_domain_max_times: int = self.retry_config['retry_domain_max_times']
+        retry_rounds: int = self.retry_config['retry_rounds']
+        for rindex in range(retry_rounds):
+            domain_list = self.get_sorted_domain(client, retry_domain_max_times)
+            for i, domain in enumerate(domain_list):
+                if self.failed_count(client, domain) >= retry_domain_max_times:
+                    continue
+
+                try:
+                    return do_request(domain)
+                except Exception as e:
+                    from common import traceback_print_exec
+                    traceback_print_exec()
+                    jm_log('req.error', str(e))
+                    self.update_failed_count(client, domain)
+
+        return client.fallback(request, url, 0, 0, is_image, **kwargs)
+
+    def get_sorted_domain(self, client: JmcomicClient, times):
+        domain_list = client.get_domain_list()
+        return sorted(
+            filter(lambda d: self.failed_count(client, d) < times, domain_list),
+            key=lambda d: self.failed_count(client, d)
+        )
+
+    # noinspection PyUnresolvedReferences
+    def update_failed_count(self, client: AbstractJmClient, domain: str):
+        with client.domain_counter_lock:
+            client.domain_req_failed_counter[domain] = self.failed_count(client, domain) + 1
+
+    @staticmethod
+    def failed_count(client: JmcomicClient, domain: str) -> int:
+        # noinspection PyUnresolvedReferences
+        return client.domain_req_failed_counter.get(domain, 0)

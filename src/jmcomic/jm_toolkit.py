@@ -22,9 +22,11 @@ class JmcomicText:
     pattern_html_photo_sort = compile(r'var sort = (\d+);')
     pattern_html_photo_page_arr = compile(r'var page_arr = (.*?);')
 
+    pattern_html_b64_decode_content = compile(r'const html = base64DecodeUtf8\("(.*?)"\)')
     pattern_html_album_album_id = compile(r'<span class="number">.*?：JM(\d+)</span>')
     pattern_html_album_scramble_id = compile(r'var scramble_id = (\d+);')
     pattern_html_album_name = compile(r'id="book-name"[^>]*?>([\s\S]*?)<')
+    pattern_html_album_description = compile(r'叙述：([\s\S]*?)</h2>')
     pattern_html_album_episode_list = compile(r'data-album="(\d+)"[^>]*>[\s\S]*?第(\d+)[话話]([\s\S]*?)<[\s\S]*?>')
     pattern_html_album_page_count = compile(r'<span class="pagecount">.*?:(\d+)</span>')
     pattern_html_album_pub_date = compile(r'>上架日期 : (.*?)</span>')
@@ -59,6 +61,8 @@ class JmcomicText:
 
     # 提取接口返回值信息
     pattern_ajax_favorite_msg = compile(r'</button>(.*?)</div>')
+    # 提取api接口返回值里的json，防止返回值里有无关日志导致json解析报错
+    pattern_api_response_json_object = compile(r'\{[\s\S]*?}')
 
     @classmethod
     def parse_to_jm_domain(cls, text: str):
@@ -107,6 +111,15 @@ class JmcomicText:
         ))
 
     @classmethod
+    def parse_jm_base64_html(cls, resp_text: str) -> str:
+        from base64 import b64decode
+        html_b64 = PatternTool.match_or_default(resp_text, cls.pattern_html_b64_decode_content, None)
+        if html_b64 is None:
+            return resp_text
+        html = b64decode(html_b64).decode()
+        return html
+
+    @classmethod
     def analyse_jm_photo_html(cls, html: str) -> JmPhotoDetail:
         return cls.reflect_new_instance(
             html,
@@ -117,7 +130,7 @@ class JmcomicText:
     @classmethod
     def analyse_jm_album_html(cls, html: str) -> JmAlbumDetail:
         return cls.reflect_new_instance(
-            html,
+            cls.parse_jm_base64_html(html),
             "pattern_html_album_",
             JmModuleConfig.album_class()
         )
@@ -333,6 +346,28 @@ class JmcomicText:
             raise e
         return save_dir
 
+    # noinspection PyTypeChecker
+    @classmethod
+    def try_parse_json_object(cls, resp_text: str) -> dict:
+        import json
+        text = resp_text.strip()
+        if text.startswith('{') and text.endswith('}'):
+            # fast case
+            return json.loads(text)
+
+        for match in cls.pattern_api_response_json_object.finditer(text):
+            try:
+                return json.loads(match.group(0))
+            except Exception as e:
+                jm_log('parse_json_object.error', e)
+
+        raise AssertionError(f'未解析出json数据: {cls.limit_text(resp_text, 200)}')
+
+    @classmethod
+    def limit_text(cls, text: str, limit: int) -> str:
+        length = len(text)
+        return text if length <= limit else (text[:limit] + f'...({length - limit}')
+
 
 # 支持dsl: #{???} -> os.getenv(???)
 JmcomicText.dsl_replacer.add_dsl_and_replacer(r'\$\{(.*?)\}', JmcomicText.match_os_env)
@@ -439,10 +474,7 @@ class JmPageTool:
             # 这里不作解析，因为没什么用...
             tags = cls.pattern_html_search_tags.findall(tag_text)
             content.append((
-                album_id, {
-                    'name': title,  # 改成name是为了兼容 parse_api_resp_to_page
-                    'tags': tags
-                }
+                album_id, dict(name=title, tags=tags)  # 改成name是为了兼容 parse_api_resp_to_page
             ))
 
         return JmSearchPage(content, total)
@@ -457,10 +489,7 @@ class JmPageTool:
         for (album_id, title, tag_text) in album_info_list:
             tags = cls.pattern_html_search_tags.findall(tag_text)
             content.append((
-                album_id, {
-                    'name': title,  # 改成name是为了兼容 parse_api_resp_to_page
-                    'tags': tags
-                }
+                album_id, dict(name=title, tags=tags)  # 改成name是为了兼容 parse_api_resp_to_page
             ))
 
         return JmSearchPage(content, total)
@@ -641,6 +670,7 @@ class JmApiAdaptTool:
             'actors',
             'related_list',
             'name',
+            'description',
             ('id', 'album_id'),
             ('author', 'authors'),
             ('total_views', 'views'),

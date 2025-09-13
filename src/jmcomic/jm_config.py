@@ -77,7 +77,7 @@ class JmMagicConstants:
     APP_TOKEN_SECRET_2 = '18comicAPPContent'
     APP_DATA_SECRET = '185Hcomic3PAPP7R'
     API_DOMAIN_SERVER_SECRET = 'diosfjckwpqpdfjkvnqQjsik'
-    APP_VERSION = '1.8.0'
+    APP_VERSION = '2.0.6'
 
 
 # 模块级别共用配置
@@ -128,15 +128,17 @@ class JmModuleConfig:
 
     # 移动端API域名
     DOMAIN_API_LIST = shuffled('''
-    www.cdnmhwscc.vip
-    www.cdnplaystation6.club
-    www.cdnplaystation6.org
-    www.cdnuc.vip
-    www.cdn-mspjmapiproxy.xyz
+    www.cdnaspa.vip
+    www.cdnaspa.club
+    www.cdnplaystation6.vip
+    www.cdnplaystation6.cc
     ''')
 
     # 获取最新移动端API域名的地址
-    API_URL_DOMAIN_SERVER = f'{PROT}jmappc01-1308024008.cos.ap-guangzhou.myqcloud.com/server-2024.txt'
+    API_URL_DOMAIN_SERVER_LIST = shuffled('''
+    https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt
+    https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt
+    ''')
 
     APP_HEADERS_TEMPLATE = {
         'Accept-Encoding': 'gzip, deflate',
